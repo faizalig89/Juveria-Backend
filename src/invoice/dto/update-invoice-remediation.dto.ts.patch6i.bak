@@ -1,0 +1,168 @@
+import {
+  IsArray,
+  IsDateString,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+
+import { Type } from 'class-transformer';
+
+export class InvoicePartyRemediationDto {
+  @IsIn(['SELLER', 'BUYER'])
+  role!: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  electronicAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  electronicIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  legalRegistrationIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  legalRegistrationIdentifierType?: string;
+
+  @IsOptional()
+  @IsString()
+  legalRegistrationAuthorityName?: string;
+
+  @IsOptional()
+  @IsString()
+  taxIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  taxSchemeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  addressLine1?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  countrySubdivision?: string;
+
+  @IsOptional()
+  @IsString()
+  countryCode?: string;
+}
+export class UpdateInvoiceRemediationDto {
+  @IsOptional()
+  @IsString()
+  invoiceNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  invoiceDate?: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  jurisdiction?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceTypeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionTypeCode?: string;
+
+  @IsOptional()
+  @IsDateString()
+  paymentDueDate?: string;
+
+  @IsOptional()
+  @IsString()
+  businessProcessType?: string;
+
+  @IsOptional()
+  @IsString()
+  specificationIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMeansTypeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentAccountIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  creditNoteReasonCode?: string;
+
+  @IsOptional()
+  @IsString()
+  creditNoteReasonText?: string;
+
+  @IsOptional()
+  @IsString()
+  precedingInvoiceReference?: string;
+
+  @IsOptional()
+  @IsNumber()
+  lineNetTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  allowanceTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  chargeTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalWithoutTax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalTaxAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalWithTax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  paidAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  roundingAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  amountDue?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoicePartyRemediationDto)
+  parties?: InvoicePartyRemediationDto[];}

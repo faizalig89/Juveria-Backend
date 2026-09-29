@@ -1,0 +1,190 @@
+import {
+  CsvInvoiceMapperService,
+} from './csv-invoice-mapper.service.js';
+
+describe('CsvInvoiceMapperService', () => {
+  const mapper =
+    new CsvInvoiceMapperService();
+
+  it('maps a single-line CSV invoice', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,jurisdiction,invoiceTypeCode,transactionTypeCode,sellerName,sellerCountryCode,buyerName,buyerCountryCode,totalTaxAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-001,2026-09-25,AED,1050,AE,380,00000000,Test Seller LLC,AE,Test Buyer LLC,AE,50,Consulting Services,1,1000,50,1050',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.source).toBe('CSV');
+    expect(
+      result.invoice.invoiceNumber,
+    ).toBe('CSV-TEST-001');
+
+    expect(result.invoice.currency)
+      .toBe('AED');
+
+    expect(result.invoice.parties)
+      .toHaveLength(2);
+
+    expect(result.invoice.lines)
+      .toHaveLength(1);
+
+    expect(result.invoice.totalTaxAmount)
+      .toBe(50);
+  });
+
+  it('maps multiple rows as multiple invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-002,2026-09-25,AED,210,Service A,1,100,5,105',
+      'CSV-TEST-002,2026-09-25,AED,210,Service B,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.lines)
+      .toHaveLength(2);
+  });
+
+  it('accepts UTF-8 BOM CSV', () => {
+    const csv =
+      '\uFEFF' +
+      [
+        'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+        'CSV-BOM-001,2026-09-25,AED,105,Service,1,100,5,105',
+      ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(
+      result.invoice.invoiceNumber,
+    ).toBe('CSV-BOM-001');
+  });
+
+  it('rejects multiple invoices in one upload', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-A,2026-09-25,AED,105,Service A,1,100,5,105',
+      'CSV-B,2026-09-25,AED,105,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV upload must contain exactly one invoice',
+    );
+  });
+
+  it('rejects inconsistent repeated header data', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-003,2026-09-25,AED,210,Service A,1,100,5,105',
+      'CSV-TEST-003,2026-09-26,AED,210,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent invoiceDate',
+    );
+  });
+
+  it('rejects malformed numeric data through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-004,2026-09-25,AED,abc,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'totalAmount must be a number',
+    );
+  });
+
+  it('rejects invalid dates through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-005,2026-02-30,AED,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'invoiceDate must be a valid YYYY-MM-DD date',
+    );
+  });
+
+  it('normalizes currency through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-006,2026-09-25,aed,105,Service,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.currency)
+      .toBe('AED');
+  });
+
+  it('keeps consistent repeated data across multiple lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,totalTaxAmount,sellerTaxIdentifier,buyerTaxIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-001,2026-09-25,AED,210,10,100000000000003,100000000000003,Service A,1,100,5,105',
+      'CSV-MULTI-001,2026-09-25,AED,210,10,100000000000003,100000000000003,Service B,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.invoiceNumber)
+      .toBe('CSV-MULTI-001');
+
+    expect(result.invoice.lines)
+      .toHaveLength(2);
+
+    expect(result.invoice.totalTaxAmount)
+      .toBe(10);
+  });
+
+  it('rejects inconsistent seller data across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,sellerTaxIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-002,2026-09-25,AED,210,100000000000003,Service A,1,100,5,105',
+      'CSV-MULTI-002,2026-09-25,AED,210,100000000000004,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent sellerTaxIdentifier',
+    );
+  });
+
+  it('rejects inconsistent monetary totals across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,totalTaxAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-003,2026-09-25,AED,210,10,Service A,1,100,5,105',
+      'CSV-MULTI-003,2026-09-25,AED,210,11,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent totalTaxAmount',
+    );
+  });
+
+  it('rejects inconsistent buyer data across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,buyerLegalRegistrationIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-004,2026-09-25,AED,210,BUYER-001,Service A,1,100,5,105',
+      'CSV-MULTI-004,2026-09-25,AED,210,BUYER-002,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent buyerLegalRegistrationIdentifier',
+    );
+  });
+
+});

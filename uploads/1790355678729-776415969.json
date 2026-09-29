@@ -1,0 +1,83 @@
+﻿{
+    "totalWithoutTax":  1000,
+    "specificationIdentifier":  "urn:peppol:pint:billing-1@ae-1",
+    "paymentMeansTypeCode":  "30",
+    "totalAmount":  1050,
+    "taxBreakdowns":  [
+                          {
+                              "categoryCode":  "S",
+                              "taxableAmount":  1000,
+                              "taxRate":  5,
+                              "taxAmount":  50
+                          }
+                      ],
+    "invoiceTypeCode":  "380",
+    "paidAmount":  0,
+    "totalWithTax":  1050,
+    "parties":  [
+                    {
+                        "electronicIdentifier":  "0235",
+                        "addressLine1":  "Test Seller Address",
+                        "legalRegistrationAuthorityName":  "TEST-LICENSING-AUTHORITY",
+                        "name":  "Juveria Test Seller LLC",
+                        "electronicAddress":  "seller@example.test",
+                        "countrySubdivision":  "Dubai",
+                        "city":  "Dubai",
+                        "legalRegistrationIdentifierType":  "TL",
+                        "legalRegistrationIdentifier":  "TEST-SELLER-LICENSE-001",
+                        "role":  "SELLER",
+                        "countryCode":  "AE",
+                        "taxSchemeCode":  "VAT",
+                        "taxIdentifier":  "100000000000003"
+                    },
+                    {
+                        "electronicIdentifier":  "buyer@example.test",
+                        "addressLine1":  "Test Buyer Address",
+                        "legalRegistrationAuthorityName":  "TEST-LICENSING-AUTHORITY",
+                        "name":  "Juveria Test Buyer LLC",
+                        "electronicAddress":  "buyer@example.test",
+                        "countrySubdivision":  "Dubai",
+                        "city":  "Dubai",
+                        "legalRegistrationIdentifierType":  "TL",
+                        "legalRegistrationIdentifier":  "TEST-BUYER-LICENSE-001",
+                        "role":  "BUYER",
+                        "countryCode":  "AE",
+                        "taxSchemeCode":  "VAT",
+                        "taxIdentifier":  "100000000000003"
+                    }
+                ],
+    "paymentDueDate":  "2026-10-25",
+    "allowanceTotal":  0,
+    "transactionTypeCode":  "00000000",
+    "roundingAmount":  0,
+    "lines":  [
+                  {
+                      "itemGrossPrice":  1000,
+                      "taxAmount":  50,
+                      "taxCategoryCode":  "S",
+                      "unitPrice":  1000,
+                      "itemNetPrice":  1000,
+                      "vatLineAmountAED":  50,
+                      "lineTotal":  1050,
+                      "taxRate":  5,
+                      "unitOfMeasureCode":  "C62",
+                      "lineNetAmount":  1000,
+                      "lineIdentifier":  "1",
+                      "quantity":  1,
+                      "priceBaseQuantity":  1,
+                      "itemName":  "GRC Consulting Services",
+                      "lineAmountAED":  1050,
+                      "description":  "GRC Consulting Services"
+                  }
+              ],
+    "businessProcessType":  "urn:peppol:bis:billing",
+    "chargeTotal":  0,
+    "totalTaxAmount":  50,
+    "invoiceNumber":  "JUVERIA-BOM-E2E-001",
+    "jurisdiction":  "AE",
+    "amountDue":  1050,
+    "currency":  "AED",
+    "lineNetTotal":  1000,
+    "invoiceDate":  "2026-09-25",
+    "paymentAccountIdentifier":  "TEST-PAYMENT-ACCOUNT-001"
+}

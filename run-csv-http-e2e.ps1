@@ -1,0 +1,266 @@
+$ErrorActionPreference = "Stop"
+
+Set-Location "C:\Projects\adescare-einvoice\backend"
+
+Write-Host ""
+Write-Host "=============================================="
+Write-Host "JUVERIA CSV HTTP E2E"
+Write-Host "=============================================="
+
+# ------------------------------------------------------------
+# HEALTH
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== HEALTH ==="
+
+$health = Invoke-RestMethod `
+    -Uri "http://localhost:4000/health/live"
+
+if ($health.status -ne "ok") {
+    throw "BACKEND HEALTH CHECK FAILED"
+}
+
+Write-Host "HEALTH = PASS"
+
+# ------------------------------------------------------------
+# CSV FIXTURE
+# ------------------------------------------------------------
+
+$csvPath = Join-Path `
+    (Get-Location) `
+    "juveria-csv-e2e.csv"
+
+if (-not (Test-Path $csvPath)) {
+    throw "CSV FIXTURE NOT FOUND"
+}
+
+Write-Host "CSV FIXTURE = FOUND"
+
+# ------------------------------------------------------------
+# LOGIN
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== LOGIN ==="
+
+$loginBody = @{
+    email    = "authtest@adescare-demo.com"
+    password = "Test@12345"
+} | ConvertTo-Json
+
+$login = Invoke-RestMethod `
+    -Method POST `
+    -Uri "http://localhost:4000/auth/login" `
+    -ContentType "application/json" `
+    -Body $loginBody
+
+$token = $login.access_token
+
+if (-not $token) {
+    $token = $login.accessToken
+}
+
+if (-not $token) {
+    throw "LOGIN FAILED: TOKEN MISSING"
+}
+
+Write-Host "LOGIN = PASS"
+
+# ------------------------------------------------------------
+# UPLOAD
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== REAL CSV MULTIPART UPLOAD ==="
+
+$uploadRaw = & curl.exe `
+    --silent `
+    --show-error `
+    --fail-with-body `
+    -X POST `
+    "http://localhost:4000/invoice-document/upload" `
+    -H "Authorization: Bearer $token" `
+    -F "file=@$csvPath;type=text/csv"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "SERVER RESPONSE:"
+    Write-Host $uploadRaw
+    throw "CSV HTTP UPLOAD FAILED"
+}
+
+try {
+    $upload = $uploadRaw |
+        ConvertFrom-Json
+}
+catch {
+    Write-Host $uploadRaw
+    throw "UPLOAD RESPONSE IS NOT VALID JSON"
+}
+
+$invoiceId = $upload.invoice.id
+
+if (-not $invoiceId) {
+    $upload |
+        ConvertTo-Json -Depth 10 |
+        Write-Host
+
+    throw "UPLOAD RESPONSE HAS NO INVOICE ID"
+}
+
+Write-Host "CSV_HTTP_UPLOAD = PASS"
+Write-Host "INVOICE_ID =" $invoiceId
+Write-Host "INVOICE_NUMBER =" $upload.invoice.invoiceNumber
+
+# ------------------------------------------------------------
+# DATABASE RETRIEVAL
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== DATABASE PERSISTENCE ==="
+
+$headers = @{
+    Authorization = "Bearer $token"
+}
+
+$invoice = Invoke-RestMethod `
+    -Method GET `
+    -Uri "http://localhost:4000/invoice/$invoiceId" `
+    -Headers $headers
+
+Write-Host "PARTIES =" @($invoice.parties).Count
+Write-Host "LINES =" @($invoice.lines).Count
+Write-Host "TAX BREAKDOWNS =" @($invoice.taxBreakdowns).Count
+Write-Host "DOCUMENTS =" @($invoice.documents).Count
+
+if ($invoice.id -ne $invoiceId) {
+    throw "DATABASE INVOICE ID MISMATCH"
+}
+
+if (@($invoice.parties).Count -ne 2) {
+    throw "DATABASE EXPECTED 2 PARTIES"
+}
+
+if (@($invoice.lines).Count -ne 1) {
+    throw "DATABASE EXPECTED 1 LINE"
+}
+
+if (@($invoice.taxBreakdowns).Count -ne 1) {
+    throw "DATABASE EXPECTED 1 TAX BREAKDOWN"
+}
+
+if (@($invoice.documents).Count -ne 1) {
+    throw "DATABASE EXPECTED 1 DOCUMENT"
+}
+
+Write-Host "DATABASE_PERSISTENCE = PASS"
+
+# ------------------------------------------------------------
+# READINESS
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== UAE READINESS ==="
+
+$readiness = Invoke-RestMethod `
+    -Method POST `
+    -Uri "http://localhost:4000/compliance/invoice/$invoiceId/readiness" `
+    -Headers $headers
+
+$internalResults = @($readiness.internal.results)
+$internalTotal   = $internalResults.Count
+$internalPassed  = @($internalResults | Where-Object status -eq "PASS").Count
+$internalFailed  = @($internalResults | Where-Object status -eq "FAIL").Count
+$internalSkipped = @($internalResults | Where-Object status -eq "SKIP").Count
+Write-Host "READINESS =" $readiness.readinessStatus
+Write-Host "INTERNAL TOTAL =" $internalTotal
+Write-Host "INTERNAL PASSED =" $internalPassed
+Write-Host "INTERNAL FAILED =" $internalFailed
+Write-Host "INTERNAL SKIPPED =" $internalSkipped
+Write-Host "OFFICIAL PASSED =" $readiness.official.passed
+Write-Host "OFFICIAL FAILURES =" $readiness.official.totalFailures
+Write-Host "UBL GENERATED =" $readiness.ublGenerated
+
+# ------------------------------------------------------------
+# DIAGNOSTICS BEFORE ASSERTIONS
+# ------------------------------------------------------------
+
+if ($internalFailed -gt 0) {
+
+    Write-Host ""
+    Write-Host "=== INTERNAL FAILURES ==="
+
+    $readiness.internal.results |
+        Where-Object status -eq "FAIL" |
+        Select-Object `
+            ruleCode,
+            ruleName,
+            field,
+            actualValue,
+            message |
+        Format-List
+}
+
+if (
+    $readiness.official.totalFailures -gt 0
+) {
+
+    Write-Host ""
+    Write-Host "=== OFFICIAL FAILURES ==="
+
+    $readiness.official.failures |
+        Select-Object `
+            source,
+            id,
+            flag,
+            message,
+            location |
+        Format-List
+}
+
+# ------------------------------------------------------------
+# HARD GATES
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "=== HARD ACCEPTANCE GATES ==="
+
+if ($readiness.readinessStatus -ne "READY") {
+    throw "GATE FAILED: READINESS != READY"
+}
+
+if ($internalTotal -ne 77) {
+    throw "GATE FAILED: INTERNAL TOTAL != 77"
+}
+
+if ($internalPassed -ne 77) {
+    throw "GATE FAILED: INTERNAL PASSED != 77"
+}
+
+if ($internalFailed -ne 0) {
+    throw "GATE FAILED: INTERNAL FAILURES EXIST"
+}
+
+if ($internalSkipped -ne 0) {
+    throw "GATE FAILED: INTERNAL RULES SKIPPED"
+}
+
+if ($readiness.ublGenerated -ne $true) {
+    throw "GATE FAILED: UBL NOT GENERATED"
+}
+
+if ($readiness.official.passed -ne $true) {
+    throw "GATE FAILED: OFFICIAL PINT-AE FAILED"
+}
+
+if ($readiness.official.totalFailures -ne 0) {
+    throw "GATE FAILED: OFFICIAL FAILURES EXIST"
+}
+
+Write-Host ""
+Write-Host "======================================================"
+Write-Host "JUVERIA REAL CSV HTTP E2E = PASS"
+Write-Host "CSV -> CANONICAL -> DB -> 77 RULES -> UBL -> PINT-AE"
+Write-Host "READY = YES"
+Write-Host "======================================================"

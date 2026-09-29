@@ -1,0 +1,17 @@
+import { Body, Controller, Get, Post } from '@nestjs/common';
+import { TenantService } from './tenant.service.js';
+
+@Controller('tenant')
+export class TenantController {
+  constructor(private readonly tenantService: TenantService) {}
+
+  @Get()
+  async findAll() {
+    return this.tenantService.findAll();
+  }
+
+  @Post()
+  async create(@Body() body: { name: string; slug: string }) {
+    return this.tenantService.create(body.name, body.slug);
+  }
+}

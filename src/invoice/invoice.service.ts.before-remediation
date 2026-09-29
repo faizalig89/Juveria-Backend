@@ -1,0 +1,234 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import type { IngestedInvoice } from '../invoice-ingestion/invoice-ingestion.types.js';
+
+@Injectable()
+export class InvoiceService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    dto: CreateInvoiceDto,
+    tenantId: string,
+    uploadedById: string,
+  ) {
+    return this.prisma.invoice.create({
+      data: {
+        tenantId,
+        uploadedById,
+        invoiceNumber: dto.invoiceNumber,
+        invoiceDate: new Date(dto.invoiceDate),
+        currency: dto.currency,
+        totalAmount: dto.totalAmount,
+        status: 'RECEIVED',
+
+        jurisdiction: dto.jurisdiction,
+        invoiceTypeCode: dto.invoiceTypeCode,
+        transactionTypeCode: dto.transactionTypeCode,
+        paymentDueDate: dto.paymentDueDate
+          ? new Date(dto.paymentDueDate)
+          : undefined,
+        businessProcessType: dto.businessProcessType,
+        specificationIdentifier: dto.specificationIdentifier,
+        paymentMeansTypeCode: dto.paymentMeansTypeCode,
+
+        lineNetTotal: dto.lineNetTotal,
+        totalWithoutTax: dto.totalWithoutTax,
+        totalTaxAmount: dto.totalTaxAmount,
+        totalWithTax: dto.totalWithTax,
+        amountDue: dto.amountDue,
+
+        parties: dto.parties?.length
+          ? {
+              create: dto.parties,
+            }
+          : undefined,
+
+        taxBreakdowns: dto.taxBreakdowns?.length
+          ? {
+              create: dto.taxBreakdowns,
+            }
+          : undefined,
+
+        lines: dto.lines?.length
+          ? {
+              create: dto.lines,
+            }
+          : undefined,
+      },
+      include: {
+        parties: true,
+        taxBreakdowns: true,
+        lines: true,
+        documents: true,
+      },
+    });
+  }
+
+  async createFromIngestion(
+    invoice: IngestedInvoice,
+    tenantId: string,
+    uploadedById: string,
+  ) {
+    return this.prisma.invoice.create({
+      data: {
+        tenantId,
+        uploadedById,
+
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: new Date(invoice.invoiceDate),
+        currency: invoice.currency,
+        totalAmount: invoice.totalAmount,
+
+        status: 'RECEIVED',
+        complianceStatus: 'PENDING',
+
+        jurisdiction: invoice.jurisdiction,
+        invoiceTypeCode: invoice.invoiceTypeCode,
+        transactionTypeCode:
+          invoice.transactionTypeCode,
+
+        paymentDueDate:
+          invoice.paymentDueDate
+            ? new Date(invoice.paymentDueDate)
+            : undefined,
+
+        businessProcessType:
+          invoice.businessProcessType,
+
+        specificationIdentifier:
+          invoice.specificationIdentifier,
+
+        paymentMeansTypeCode:
+          invoice.paymentMeansTypeCode,
+
+        paymentAccountIdentifier:
+          invoice.paymentAccountIdentifier,
+
+        creditNoteReasonCode:
+          invoice.creditNoteReasonCode,
+
+        creditNoteReasonText:
+          invoice.creditNoteReasonText,
+
+        precedingInvoiceReference:
+          invoice.precedingInvoiceReference,
+
+        lineNetTotal:
+          invoice.lineNetTotal,
+
+        allowanceTotal:
+          invoice.allowanceTotal,
+
+        chargeTotal:
+          invoice.chargeTotal,
+
+        totalWithoutTax:
+          invoice.totalWithoutTax,
+
+        totalTaxAmount:
+          invoice.totalTaxAmount,
+
+        totalWithTax:
+          invoice.totalWithTax,
+
+        paidAmount:
+          invoice.paidAmount,
+
+        roundingAmount:
+          invoice.roundingAmount,
+
+        amountDue:
+          invoice.amountDue,
+
+        parties: invoice.parties?.length
+          ? {
+              create: invoice.parties,
+            }
+          : undefined,
+
+        taxBreakdowns:
+          invoice.taxBreakdowns?.length
+            ? {
+                create: invoice.taxBreakdowns,
+              }
+            : undefined,
+
+        lines: invoice.lines?.length
+          ? {
+              create: invoice.lines,
+            }
+          : undefined,
+
+        allowanceCharges:
+          invoice.allowanceCharges?.length
+            ? {
+                create:
+                  invoice.allowanceCharges,
+              }
+            : undefined,
+      },
+
+      include: {
+        parties: true,
+        taxBreakdowns: true,
+        lines: true,
+        allowanceCharges: true,
+        documents: true,
+      },
+    });
+  }
+  async findAllByTenant(tenantId: string) {
+    return this.prisma.invoice.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAuditHistory(id: string, tenantId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    return this.prisma.invoiceAuditEvent.findMany({
+      where: {
+        invoiceId: id,
+        tenantId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+  }
+
+  async findOne(id: string, tenantId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+      include: {
+        lines: true,
+        documents: true,
+        parties: true,
+        taxBreakdowns: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    return invoice;
+  }
+}

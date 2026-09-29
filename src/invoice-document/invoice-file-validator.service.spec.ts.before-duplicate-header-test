@@ -1,0 +1,158 @@
+import { BadRequestException } from '@nestjs/common';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { InvoiceFileValidatorService } from './invoice-file-validator.service.js';
+
+describe('InvoiceFileValidatorService JSON validation', () => {
+  let service: InvoiceFileValidatorService;
+  let directory: string;
+
+  beforeEach(async () => {
+    service = new InvoiceFileValidatorService();
+    directory = await mkdtemp(join(tmpdir(), 'juveria-json-'));
+  });
+
+  afterEach(async () => {
+    await rm(directory, {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('accepts normal UTF-8 JSON', async () => {
+    const file = join(directory, 'invoice.json');
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        invoiceNumber: 'JSON-NORMAL-001',
+      }),
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.json'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('accepts UTF-8 JSON containing a BOM', async () => {
+    const file = join(directory, 'invoice-bom.json');
+
+    await writeFile(
+      file,
+      '\uFEFF' +
+        JSON.stringify({
+          invoiceNumber: 'JSON-BOM-001',
+        }),
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.json'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects malformed JSON', async () => {
+    const file = join(directory, 'invalid.json');
+
+    await writeFile(
+      file,
+      '{"invoiceNumber":',
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.json'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an empty JSON file', async () => {
+    const file = join(directory, 'empty.json');
+
+    await writeFile(file, '', 'utf8');
+
+    await expect(
+      service.validate(file, '.json'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('accepts a structurally valid CSV file', async () => {
+    const file = join(directory, 'invoice.csv');
+
+    await writeFile(
+      file,
+      [
+        'invoiceNumber,invoiceDate,currency,totalAmount',
+        'CSV-VALID-001,2026-09-25,AED,105',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.csv'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('accepts UTF-8 CSV containing a BOM', async () => {
+    const file = join(directory, 'invoice-bom.csv');
+
+    await writeFile(
+      file,
+      '\uFEFF' +
+        [
+          'invoiceNumber,invoiceDate,currency,totalAmount',
+          'CSV-BOM-001,2026-09-25,AED,105',
+        ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.csv'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rejects an empty CSV file', async () => {
+    const file = join(directory, 'empty.csv');
+
+    await writeFile(file, '', 'utf8');
+
+    await expect(
+      service.validate(file, '.csv'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects CSV containing headers but no records', async () => {
+    const file = join(directory, 'headers-only.csv');
+
+    await writeFile(
+      file,
+      'invoiceNumber,invoiceDate,currency,totalAmount',
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.csv'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects malformed CSV quoting', async () => {
+    const file = join(directory, 'malformed.csv');
+
+    await writeFile(
+      file,
+      [
+        'invoiceNumber,invoiceDate,currency,totalAmount',
+        '"CSV-BROKEN-001,2026-09-25,AED,105',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      service.validate(file, '.csv'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+});

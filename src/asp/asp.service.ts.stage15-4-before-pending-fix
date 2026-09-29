@@ -1,0 +1,276 @@
+﻿import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { UaeEinvoiceReadinessService } from '../compliance/readiness/uae-einvoice-readiness.service.js';
+import { UaePintAeUblService } from '../compliance/ubl/uae-pint-ae-ubl.service.js';
+import type {
+  AspAdapter,
+  AspSubmissionRequest,
+} from './contracts/asp-adapter.interface.js';
+import { ASP_ADAPTER } from './contracts/asp.tokens.js';
+
+@Injectable()
+export class AspService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly readinessService: UaeEinvoiceReadinessService,
+    private readonly ublService: UaePintAeUblService,
+    @Inject(ASP_ADAPTER)
+    private readonly adapter: AspAdapter,
+  ) {}
+
+  async submit(
+    invoiceId: string,
+    tenantId: string,
+    userId?: string,
+  ) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id: invoiceId,
+        tenantId,
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        invoiceTypeCode: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException(
+        'Invoice not found for authenticated tenant.',
+      );
+    }
+
+    const readiness = await this.readinessService.evaluate(
+      invoiceId,
+      tenantId,
+      userId,
+    );
+
+    if (readiness.readinessStatus !== 'READY') {
+      throw new BadRequestException({
+        message:
+          'Document is not READY and cannot be submitted to an ASP.',
+        invoiceId,
+        readinessStatus: readiness.readinessStatus,
+        internalPassed: readiness.internal.passed,
+        officialPassed: readiness.official.passed,
+      });
+    }
+
+    const documentType =
+      invoice.invoiceTypeCode === '381'
+        ? 'CREDIT_NOTE'
+        : invoice.invoiceTypeCode === '380'
+          ? 'INVOICE'
+          : null;
+
+    if (!documentType) {
+      throw new BadRequestException(
+        `Unsupported document type for ASP submission: ${invoice.invoiceTypeCode ?? 'MISSING'}`,
+      );
+    }
+
+    const ublXml = await this.ublService.generate(
+      invoiceId,
+      tenantId,
+    );
+
+    const documentFingerprint = createHash('sha256')
+      .update(ublXml, 'utf8')
+      .digest('hex');
+
+    const idempotencyKey = createHash('sha256')
+      .update(
+        [
+          tenantId,
+          invoiceId,
+          this.adapter.providerName,
+          documentFingerprint,
+        ].join(':'),
+        'utf8',
+      )
+      .digest('hex');
+
+    let persistentSubmission;
+    let ownsSubmission = false;
+
+    try {
+      persistentSubmission =
+        await this.prisma.aspSubmission.create({
+          data: {
+            invoiceId,
+            tenantId,
+            provider: this.adapter.providerName,
+            documentType,
+            documentNumber: invoice.invoiceNumber,
+            status: 'CREATED',
+            idempotencyKey,
+          },
+        });
+
+      ownsSubmission = true;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        persistentSubmission =
+          await this.prisma.aspSubmission.findUnique({
+            where: {
+              idempotencyKey,
+            },
+          });
+
+        if (!persistentSubmission) {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
+
+    if (!ownsSubmission) {
+      return {
+        invoiceId,
+        documentNumber: invoice.invoiceNumber,
+        documentType,
+        readinessStatus: readiness.readinessStatus,
+        provider: persistentSubmission.provider,
+        duplicate: true,
+        submission: persistentSubmission,
+      };
+    }
+
+    const attempt =
+      await this.prisma.aspSubmissionAttempt.create({
+        data: {
+          submissionId: persistentSubmission.id,
+          attemptNumber: 1,
+          status: 'SUBMITTING',
+        },
+      });
+
+    await this.prisma.aspSubmission.update({
+      where: {
+        id: persistentSubmission.id,
+      },
+      data: {
+        status: 'SUBMITTING',
+        attemptCount: 1,
+        submittedAt: new Date(),
+      },
+    });
+
+    const request: AspSubmissionRequest = {
+      invoiceId,
+      tenantId,
+      documentType,
+      documentNumber: invoice.invoiceNumber,
+      ublXml,
+      idempotencyKey,
+    };
+
+    try {
+      const result =
+        await this.adapter.submit(request);
+
+      const completedAt = new Date();
+
+      await this.prisma.aspSubmissionAttempt.update({
+        where: {
+          id: attempt.id,
+        },
+        data: {
+          status: result.status,
+          providerReference:
+            result.providerReference ?? null,
+          message: result.message ?? null,
+          completedAt,
+        },
+      });
+
+      const persistedResult =
+        await this.prisma.aspSubmission.update({
+          where: {
+            id: persistentSubmission.id,
+          },
+          data: {
+            status: result.status,
+            providerReference:
+              result.providerReference ?? null,
+            completedAt,
+            acceptedAt:
+              result.status === 'ACCEPTED'
+                ? completedAt
+                : null,
+            rejectedAt:
+              result.status === 'REJECTED'
+                ? completedAt
+                : null,
+          },
+        });
+
+      return {
+        invoiceId,
+        documentNumber: invoice.invoiceNumber,
+        documentType,
+        readinessStatus:
+          readiness.readinessStatus,
+        provider: result.provider,
+        duplicate: false,
+        submission: persistedResult,
+        providerResult: result,
+      };
+    } catch (error) {
+      const completedAt = new Date();
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unknown ASP submission error';
+
+      await this.prisma.$transaction([
+        this.prisma.aspSubmissionAttempt.update({
+          where: {
+            id: attempt.id,
+          },
+          data: {
+            status: 'UNKNOWN',
+            errorCode:
+              'ASP_RESPONSE_UNKNOWN',
+            errorMessage,
+            completedAt,
+          },
+        }),
+
+        this.prisma.aspSubmission.update({
+          where: {
+            id: persistentSubmission.id,
+          },
+          data: {
+            status: 'UNKNOWN',
+            lastError: errorMessage,
+            completedAt,
+          },
+        }),
+      ]);
+
+      throw new BadRequestException({
+        message:
+          'ASP submission outcome is unknown. Automatic retry is blocked pending reconciliation.',
+        invoiceId,
+        submissionId:
+          persistentSubmission.id,
+        status: 'UNKNOWN',
+      });
+    }
+  }
+}

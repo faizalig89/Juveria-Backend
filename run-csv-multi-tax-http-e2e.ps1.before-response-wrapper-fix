@@ -1,0 +1,201 @@
+$ErrorActionPreference = "Stop"
+
+$baseUrl = "http://localhost:4000"
+$csvPath = Join-Path $PSScriptRoot "juveria-csv-multi-tax-e2e.csv"
+
+Write-Host ""
+Write-Host "=============================================="
+Write-Host "JUVERIA MULTI-TAX CSV HTTP E2E"
+Write-Host "=============================================="
+
+# ---------- HEALTH ----------
+Write-Host ""
+Write-Host "=== HEALTH ==="
+
+$health = Invoke-RestMethod `
+    -Method Get `
+    -Uri "$baseUrl/health/live"
+
+if ($health.status -ne "ok") {
+    throw "BACKEND HEALTH FAILED - STOP"
+}
+
+Write-Host "HEALTH = PASS"
+
+if (-not (Test-Path $csvPath)) {
+    throw "MULTI-TAX CSV FIXTURE NOT FOUND - STOP"
+}
+
+Write-Host "CSV FIXTURE = FOUND"
+
+# ---------- LOGIN ----------
+Write-Host ""
+Write-Host "=== LOGIN ==="
+
+$loginBody = @{
+    email    = "authtest@adescare-demo.com"
+    password = "Test@12345"
+} | ConvertTo-Json
+
+$login = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$baseUrl/auth/login" `
+    -ContentType "application/json" `
+    -Body $loginBody
+
+$token = $login.accessToken
+
+if (-not $token) {
+    $token = $login.access_token
+}
+
+if (-not $token) {
+    throw "LOGIN TOKEN MISSING - STOP"
+}
+
+Write-Host "LOGIN = PASS"
+
+# ---------- UPLOAD ----------
+Write-Host ""
+Write-Host "=== MULTI-TAX CSV UPLOAD ==="
+
+$uploadRaw = & curl.exe `
+    -sS `
+    -X POST `
+    "$baseUrl/invoice-document/upload" `
+    -H "Authorization: Bearer $token" `
+    -F "file=@$csvPath"
+
+if ($LASTEXITCODE -ne 0) {
+    throw "CURL UPLOAD FAILED - STOP"
+}
+
+try {
+    $upload = $uploadRaw | ConvertFrom-Json
+}
+catch {
+    Write-Host $uploadRaw
+    throw "UPLOAD RESPONSE WAS NOT JSON - STOP"
+}
+
+if (-not $upload.id) {
+    Write-Host ($upload | ConvertTo-Json -Depth 20)
+    throw "UPLOAD DID NOT RETURN INVOICE ID - STOP"
+}
+
+$invoiceId = $upload.id
+
+Write-Host "UPLOAD = PASS"
+Write-Host "INVOICE_ID = $invoiceId"
+Write-Host "INVOICE_NUMBER = $($upload.invoiceNumber)"
+
+# ---------- PERSISTED STRUCTURE ----------
+Write-Host ""
+Write-Host "=== DATABASE PERSISTENCE ==="
+
+$lines = @($upload.lines)
+$taxBreakdowns = @($upload.taxBreakdowns)
+$documents = @($upload.documents)
+$parties = @($upload.parties)
+
+Write-Host "PARTIES = $($parties.Count)"
+Write-Host "LINES = $($lines.Count)"
+Write-Host "TAX BREAKDOWNS = $($taxBreakdowns.Count)"
+Write-Host "DOCUMENTS = $($documents.Count)"
+
+if ($lines.Count -ne 2) {
+    throw "EXPECTED 2 PERSISTED LINES - STOP"
+}
+
+if ($taxBreakdowns.Count -ne 2) {
+    throw "EXPECTED 2 PERSISTED TAX BREAKDOWNS - STOP"
+}
+
+Write-Host "DATABASE MULTI-TAX STRUCTURE = PASS"
+
+Write-Host ""
+Write-Host "PERSISTED TAX BREAKDOWNS:"
+
+$taxBreakdowns |
+    Select-Object categoryCode,taxRate,taxableAmount,taxAmount |
+    Format-Table -AutoSize
+
+# ---------- READINESS ----------
+Write-Host ""
+Write-Host "=== UAE READINESS ==="
+
+$readiness = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$baseUrl/compliance/invoice/$invoiceId/readiness" `
+    -Headers @{
+        Authorization = "Bearer $token"
+    }
+
+$internalResults = @($readiness.internal.results)
+
+$internalPassed = @(
+    $internalResults |
+    Where-Object status -eq "PASS"
+).Count
+
+$internalFailed = @(
+    $internalResults |
+    Where-Object status -eq "FAIL"
+).Count
+
+$internalSkipped = @(
+    $internalResults |
+    Where-Object status -eq "SKIP"
+).Count
+
+$officialFailures = @(
+    $readiness.official.failures
+)
+
+Write-Host "READINESS = $($readiness.readinessStatus)"
+Write-Host "INTERNAL TOTAL = $($internalResults.Count)"
+Write-Host "INTERNAL PASSED = $internalPassed"
+Write-Host "INTERNAL FAILED = $internalFailed"
+Write-Host "INTERNAL SKIPPED = $internalSkipped"
+Write-Host "OFFICIAL PASSED = $($readiness.official.passed)"
+Write-Host "OFFICIAL FAILURES = $($officialFailures.Count)"
+Write-Host "UBL GENERATED = $($readiness.ublGenerated)"
+
+if ($internalFailed -gt 0) {
+    Write-Host ""
+    Write-Host "=== INTERNAL FAILURES ==="
+
+    $internalResults |
+        Where-Object status -eq "FAIL" |
+        Select-Object ruleCode,ruleName,message,field,actualValue |
+        Format-List
+}
+
+if ($officialFailures.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== OFFICIAL PINT-AE FAILURES ==="
+
+    $officialFailures |
+        Select-Object source,id,flag,message,location,test |
+        Format-List
+}
+
+Write-Host ""
+Write-Host "=============================================="
+
+if (
+    $readiness.readinessStatus -eq "READY" -and
+    $internalFailed -eq 0 -and
+    $readiness.official.passed -eq $true -and
+    $officialFailures.Count -eq 0 -and
+    $readiness.ublGenerated -eq $true
+) {
+    Write-Host "JUVERIA MULTI-TAX CSV HTTP E2E = PASS"
+    Write-Host "2 LINES -> 2 TAX GROUPS -> UBL -> PINT-AE"
+}
+else {
+    Write-Host "JUVERIA MULTI-TAX DIAGNOSTIC = NOT READY"
+    Write-Host "FAILURES ABOVE ARE THE NEXT SOURCE OF TRUTH"
+}
+
+Write-Host "=============================================="

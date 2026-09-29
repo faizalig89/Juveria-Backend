@@ -1,0 +1,919 @@
+import { Injectable } from '@nestjs/common';
+import { UaePintAeSemanticValidator } from './uae-pint-ae-semantic.validator.js';
+import { UaePintAeConditionalValidator } from './uae-pint-ae-conditional.validator.js';
+import { UaePintAeCodeListValidator } from './uae-pint-ae-codelist.validator.js';
+import {
+  InvoiceRuleContext,
+  InvoiceRulePack,
+  RuleResult,
+} from './rule.types.js';
+
+@Injectable()
+export class UaePintAeRulePack implements InvoiceRulePack {
+  constructor(
+    private readonly semanticValidator: UaePintAeSemanticValidator,
+    private readonly codeListValidator: UaePintAeCodeListValidator,
+    private readonly conditionalValidator: UaePintAeConditionalValidator,
+  ) {}
+  readonly code = 'UAE-PINT-AE';
+  readonly name = 'UAE PINT-AE Tax Invoice Validation';
+
+  private hasText(value: unknown): boolean {
+    return (
+      typeof value === 'string' &&
+      value.trim().length > 0
+    );
+  }
+
+  private requiredTextRule(
+    ruleCode: string,
+    ruleName: string,
+    field: string,
+    value: unknown,
+  ): RuleResult {
+    const valid = this.hasText(value);
+
+    return {
+      ruleCode,
+      ruleName,
+      status: valid ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: valid
+        ? `${ruleName} is present`
+        : `${ruleName} is required`,
+      field,
+      actualValue:
+        value === null || value === undefined
+          ? ''
+          : String(value),
+    };
+  }
+
+  evaluate(invoice: InvoiceRuleContext): RuleResult[] {
+    const results: RuleResult[] = [];
+
+    /*
+     * UAE PINT-AE Tax Invoice mandatory-field validation.
+     *
+     * Source basis:
+     * UAE Ministry of Finance
+     * "UAE Electronic Invoice mandatory fields"
+     * Version 1.0 - 23 February 2026.
+     *
+     * This first implementation validates mandatory presence
+     * for the Invoice Details group only.
+     *
+     * Code-list validation, conditional applicability and
+     * cross-field semantic rules are separate controls and
+     * must not be inferred from presence alone.
+     */
+
+    // UAE mandatory field 1
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-001',
+        'Invoice number',
+        'invoiceNumber',
+        invoice.invoiceNumber,
+      ),
+    );
+
+    // UAE mandatory field 2
+    const validInvoiceDate =
+      invoice.invoiceDate instanceof Date &&
+      !Number.isNaN(invoice.invoiceDate.getTime());
+
+    results.push({
+      ruleCode: 'UAE-INV-002',
+      ruleName: 'Invoice date',
+      status: validInvoiceDate ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: validInvoiceDate
+        ? 'Invoice date is present and valid'
+        : 'Invoice date is required',
+      field: 'invoiceDate',
+      actualValue: validInvoiceDate
+        ? invoice.invoiceDate.toISOString()
+        : '',
+    });
+
+    // UAE mandatory field 3
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-003',
+        'Invoice type code',
+        'invoiceTypeCode',
+        invoice.invoiceTypeCode,
+      ),
+    );
+
+    // UAE mandatory field 4
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-004',
+        'Invoice currency code',
+        'currency',
+        invoice.currency,
+      ),
+    );
+
+    // UAE mandatory field 5
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-005',
+        'Invoice transaction type code',
+        'transactionTypeCode',
+        invoice.transactionTypeCode,
+      ),
+    );
+
+    // UAE mandatory field 6
+    const validPaymentDueDate =
+      invoice.paymentDueDate instanceof Date &&
+      !Number.isNaN(invoice.paymentDueDate.getTime());
+
+    results.push({
+      ruleCode: 'UAE-INV-006',
+      ruleName: 'Payment due date',
+      status: validPaymentDueDate ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: validPaymentDueDate
+        ? 'Payment due date is present and valid'
+        : 'Payment due date is required',
+      field: 'paymentDueDate',
+      actualValue: validPaymentDueDate
+        ? invoice.paymentDueDate!.toISOString()
+        : '',
+    });
+
+    // UAE mandatory field 7
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-007',
+        'Business process type',
+        'businessProcessType',
+        invoice.businessProcessType,
+      ),
+    );
+
+    // UAE mandatory field 8
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-008',
+        'Specification identifier',
+        'specificationIdentifier',
+        invoice.specificationIdentifier,
+      ),
+    );
+
+    // UAE mandatory field 9
+    results.push(
+      this.requiredTextRule(
+        'UAE-INV-009',
+        'Payment means type code',
+        'paymentMeansTypeCode',
+        invoice.paymentMeansTypeCode,
+      ),
+    );
+
+    // ========================================================
+    // SELLER INFORMATION - UAE mandatory fields 10-20
+    // ========================================================
+
+    const seller = invoice.parties?.find(
+      (party) => party.role.toUpperCase() === 'SELLER',
+    );
+
+    const sellerValue = (
+      value: unknown,
+    ): unknown => seller ? value : undefined;
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-001',
+        'Seller name',
+        'seller.name',
+        sellerValue(seller?.name),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-002',
+        'Seller electronic address',
+        'seller.electronicAddress',
+        sellerValue(seller?.electronicAddress),
+      ),
+    );
+
+    const sellerElectronicIdentifier =
+      seller?.electronicIdentifier?.trim() ?? '';
+
+    const validSellerElectronicIdentifier =
+      sellerElectronicIdentifier === '0235';
+
+    results.push({
+      ruleCode: 'UAE-SEL-003',
+      ruleName: 'Seller electronic identifier',
+      status: validSellerElectronicIdentifier
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validSellerElectronicIdentifier
+        ? 'Seller electronic identifier is valid for a UAE-registered business'
+        : 'Seller electronic identifier must be 0235 for a UAE-registered business',
+      field: 'seller.electronicIdentifier',
+      actualValue: sellerElectronicIdentifier,
+    });
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-004',
+        'Seller legal registration identifier',
+        'seller.legalRegistrationIdentifier',
+        sellerValue(
+          seller?.legalRegistrationIdentifier,
+        ),
+      ),
+    );
+
+    const sellerRegistrationType =
+      seller?.legalRegistrationIdentifierType
+        ?.trim()
+        .toUpperCase() ?? '';
+
+    const allowedSellerRegistrationTypes = [
+      'TL',
+      'EID',
+      'PAS',
+      'CD',
+    ];
+
+    const validSellerRegistrationType =
+      allowedSellerRegistrationTypes.includes(
+        sellerRegistrationType,
+      );
+
+    results.push({
+      ruleCode: 'UAE-SEL-005',
+      ruleName:
+        'Seller legal registration identifier type',
+      status: validSellerRegistrationType
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validSellerRegistrationType
+        ? 'Seller legal registration identifier type is valid'
+        : 'Seller legal registration identifier type must be TL, EID, PAS, or CD',
+      field:
+        'seller.legalRegistrationIdentifierType',
+      actualValue: sellerRegistrationType,
+    });
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-006',
+        'Seller tax registration identifier',
+        'seller.taxIdentifier',
+        sellerValue(seller?.taxIdentifier),
+      ),
+    );
+
+    const sellerTaxScheme =
+      seller?.taxSchemeCode?.trim().toUpperCase() ?? '';
+
+    const validSellerTaxScheme =
+      sellerTaxScheme === 'VAT';
+
+    results.push({
+      ruleCode: 'UAE-SEL-007',
+      ruleName: 'Seller tax scheme code',
+      status: validSellerTaxScheme
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validSellerTaxScheme
+        ? 'Seller tax scheme code is VAT'
+        : 'Seller tax scheme code must use VAT',
+      field: 'seller.taxSchemeCode',
+      actualValue: sellerTaxScheme,
+    });
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-008',
+        'Seller address line 1',
+        'seller.addressLine1',
+        sellerValue(seller?.addressLine1),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-009',
+        'Seller city',
+        'seller.city',
+        sellerValue(seller?.city),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-SEL-010',
+        'Seller country subdivision',
+        'seller.countrySubdivision',
+        sellerValue(seller?.countrySubdivision),
+      ),
+    );
+
+    const sellerCountry =
+      seller?.countryCode?.trim().toUpperCase() ?? '';
+
+    const validSellerCountry =
+      sellerCountry === 'AE';
+
+    results.push({
+      ruleCode: 'UAE-SEL-011',
+      ruleName: 'Seller country code',
+      status: validSellerCountry
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validSellerCountry
+        ? 'Seller country code is AE'
+        : 'Seller country code must be AE for this UAE seller scenario',
+      field: 'seller.countryCode',
+      actualValue: sellerCountry,
+    });
+
+    // ========================================================
+    // BUYER INFORMATION - UAE mandatory fields 21-29
+    // ========================================================
+
+    const buyer = invoice.parties?.find(
+      (party) => party.role.toUpperCase() === 'BUYER',
+    );
+
+    const buyerValue = (
+      value: unknown,
+    ): unknown => buyer ? value : undefined;
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-001',
+        'Buyer name',
+        'buyer.name',
+        buyerValue(buyer?.name),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-002',
+        'Buyer electronic address',
+        'buyer.electronicAddress',
+        buyerValue(buyer?.electronicAddress),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-003',
+        'Buyer electronic identifier',
+        'buyer.electronicIdentifier',
+        buyerValue(buyer?.electronicIdentifier),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-004',
+        'Buyer tax identifier',
+        'buyer.taxIdentifier',
+        buyerValue(buyer?.taxIdentifier),
+      ),
+    );
+
+    const buyerTaxScheme =
+      buyer?.taxSchemeCode?.trim().toUpperCase() ?? '';
+
+    const validBuyerTaxScheme =
+      buyerTaxScheme === 'VAT';
+
+    results.push({
+      ruleCode: 'UAE-BUY-005',
+      ruleName: 'Buyer tax scheme code',
+      status: validBuyerTaxScheme
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validBuyerTaxScheme
+        ? 'Buyer tax scheme code is VAT'
+        : 'Buyer tax scheme code must use VAT',
+      field: 'buyer.taxSchemeCode',
+      actualValue: buyerTaxScheme,
+    });
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-006',
+        'Buyer address line 1',
+        'buyer.addressLine1',
+        buyerValue(buyer?.addressLine1),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-007',
+        'Buyer city',
+        'buyer.city',
+        buyerValue(buyer?.city),
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-BUY-008',
+        'Buyer country subdivision',
+        'buyer.countrySubdivision',
+        buyerValue(buyer?.countrySubdivision),
+      ),
+    );
+
+    const buyerCountry =
+      buyer?.countryCode?.trim().toUpperCase() ?? '';
+
+    const validBuyerCountry =
+      buyerCountry === 'AE';
+
+    results.push({
+      ruleCode: 'UAE-BUY-009',
+      ruleName: 'Buyer country code',
+      status: validBuyerCountry
+        ? 'PASS'
+        : 'FAIL',
+      severity: 'ERROR',
+      message: validBuyerCountry
+        ? 'Buyer country code is AE'
+        : 'Buyer country code must be AE for this UAE buyer scenario',
+      field: 'buyer.countryCode',
+      actualValue: buyerCountry,
+    });
+
+    // ========================================================
+    // DOCUMENT TOTALS - UAE mandatory fields 30-34
+    // ========================================================
+
+    const monetaryRule = (
+      ruleCode: string,
+      ruleName: string,
+      field: string,
+      value: unknown,
+    ): RuleResult => {
+      const numericValue =
+        value === null ||
+        value === undefined ||
+        value === ''
+          ? Number.NaN
+          : Number(value);
+
+      const valid =
+        Number.isFinite(numericValue);
+
+      return {
+        ruleCode,
+        ruleName,
+        status: valid ? 'PASS' : 'FAIL',
+        severity: 'ERROR',
+        message: valid
+          ? `${ruleName} is present and numeric`
+          : `${ruleName} is required and must be numeric`,
+        field,
+        actualValue:
+          value === null || value === undefined
+            ? ''
+            : String(value),
+      };
+    };
+
+    results.push(
+      monetaryRule(
+        'UAE-TOT-001',
+        'Sum of invoice line net amount',
+        'lineNetTotal',
+        invoice.lineNetTotal,
+      ),
+    );
+
+    results.push(
+      monetaryRule(
+        'UAE-TOT-002',
+        'Invoice total amount without tax',
+        'totalWithoutTax',
+        invoice.totalWithoutTax,
+      ),
+    );
+
+    results.push(
+      monetaryRule(
+        'UAE-TOT-003',
+        'Invoice total tax amount',
+        'totalTaxAmount',
+        invoice.totalTaxAmount,
+      ),
+    );
+
+    results.push(
+      monetaryRule(
+        'UAE-TOT-004',
+        'Invoice total amount with tax',
+        'totalWithTax',
+        invoice.totalWithTax,
+      ),
+    );
+
+    results.push(
+      monetaryRule(
+        'UAE-TOT-005',
+        'Amount due for payment',
+        'amountDue',
+        invoice.amountDue,
+      ),
+    );
+
+    // ========================================================
+    // TAX BREAKDOWN - UAE mandatory fields 35-38
+    // ========================================================
+
+    const taxBreakdown =
+      invoice.taxBreakdowns?.[0];
+
+    const taxNumericRule = (
+      ruleCode: string,
+      ruleName: string,
+      field: string,
+      value: unknown,
+    ): RuleResult => {
+      const numericValue =
+        value === null ||
+        value === undefined ||
+        value === ''
+          ? Number.NaN
+          : Number(value);
+
+      const valid =
+        Number.isFinite(numericValue);
+
+      return {
+        ruleCode,
+        ruleName,
+        status: valid ? 'PASS' : 'FAIL',
+        severity: 'ERROR',
+        message: valid
+          ? `${ruleName} is present and numeric`
+          : `${ruleName} is required and must be numeric`,
+        field,
+        actualValue:
+          value === null || value === undefined
+            ? ''
+            : String(value),
+      };
+    };
+
+    results.push(
+      taxNumericRule(
+        'UAE-TAX-001',
+        'Tax category taxable amount',
+        'taxBreakdown.taxableAmount',
+        taxBreakdown?.taxableAmount,
+      ),
+    );
+
+    results.push(
+      taxNumericRule(
+        'UAE-TAX-002',
+        'Tax category tax amount',
+        'taxBreakdown.taxAmount',
+        taxBreakdown?.taxAmount,
+      ),
+    );
+
+    results.push(
+      this.requiredTextRule(
+        'UAE-TAX-003',
+        'Tax category code',
+        'taxBreakdown.categoryCode',
+        taxBreakdown?.categoryCode,
+      ),
+    );
+
+    results.push(
+      taxNumericRule(
+        'UAE-TAX-004',
+        'Tax category rate',
+        'taxBreakdown.taxRate',
+        taxBreakdown?.taxRate,
+      ),
+    );
+
+    // ========================================================
+    // INVOICE LINES - UAE mandatory fields 39-51
+    // Every invoice line is validated independently.
+    // ========================================================
+
+    const lineNumericRule = (
+      ruleCode: string,
+      ruleName: string,
+      field: string,
+      value: unknown,
+    ): RuleResult => {
+      const numericValue =
+        value === null ||
+        value === undefined ||
+        value === ''
+          ? Number.NaN
+          : Number(value);
+
+      const valid = Number.isFinite(numericValue);
+
+      return {
+        ruleCode,
+        ruleName,
+        status: valid ? 'PASS' : 'FAIL',
+        severity: 'ERROR',
+        message: valid
+          ? `${ruleName} is present and numeric`
+          : `${ruleName} is required and must be numeric`,
+        field,
+        actualValue:
+          value === null || value === undefined
+            ? ''
+            : String(value),
+      };
+    };
+
+    if (!invoice.lines || invoice.lines.length === 0) {
+      const missingLineRules: Array<{
+        code: string;
+        name: string;
+        field: string;
+      }> = [
+        {
+          code: 'UAE-LINE-001',
+          name: 'Invoice line identifier',
+          field: 'lines.lineIdentifier',
+        },
+        {
+          code: 'UAE-LINE-002',
+          name: 'Invoiced quantity',
+          field: 'lines.quantity',
+        },
+        {
+          code: 'UAE-LINE-003',
+          name: 'Unit of measure code',
+          field: 'lines.unitOfMeasureCode',
+        },
+        {
+          code: 'UAE-LINE-004',
+          name: 'Invoice line net amount',
+          field: 'lines.lineNetAmount',
+        },
+        {
+          code: 'UAE-LINE-005',
+          name: 'Item net price',
+          field: 'lines.itemNetPrice',
+        },
+        {
+          code: 'UAE-LINE-006',
+          name: 'Item gross price',
+          field: 'lines.itemGrossPrice',
+        },
+        {
+          code: 'UAE-LINE-007',
+          name: 'Item price base quantity',
+          field: 'lines.priceBaseQuantity',
+        },
+        {
+          code: 'UAE-LINE-008',
+          name: 'Invoiced item tax category code',
+          field: 'lines.taxCategoryCode',
+        },
+        {
+          code: 'UAE-LINE-009',
+          name: 'Invoiced item tax rate',
+          field: 'lines.taxRate',
+        },
+        {
+          code: 'UAE-LINE-010',
+          name: 'VAT line amount in AED',
+          field: 'lines.vatLineAmountAED',
+        },
+        {
+          code: 'UAE-LINE-011',
+          name: 'Invoice line amount in AED',
+          field: 'lines.lineAmountAED',
+        },
+        {
+          code: 'UAE-LINE-012',
+          name: 'Item name',
+          field: 'lines.itemName',
+        },
+        {
+          code: 'UAE-LINE-013',
+          name: 'Item description',
+          field: 'lines.description',
+        },
+      ];
+
+      for (const rule of missingLineRules) {
+        results.push({
+          ruleCode: rule.code,
+          ruleName: rule.name,
+          status: 'FAIL',
+          severity: 'ERROR',
+          message:
+            `${rule.name} cannot be validated because the invoice has no invoice lines`,
+          field: rule.field,
+          actualValue: '',
+        });
+      }
+    } else {
+      invoice.lines.forEach((line, index) => {
+        const lineNumber = index + 1;
+        const prefix = `lines[${index}]`;
+
+        const textRule = (
+          ruleCode: string,
+          ruleName: string,
+          fieldName: string,
+          value: string | null | undefined,
+        ): RuleResult => {
+          const result = this.requiredTextRule(
+            ruleCode,
+            ruleName,
+            `${prefix}.${fieldName}`,
+            value,
+          );
+
+          return {
+            ...result,
+            ruleName: `${ruleName} - Line ${lineNumber}`,
+          };
+        };
+
+        const numericRule = (
+          ruleCode: string,
+          ruleName: string,
+          fieldName: string,
+          value: unknown,
+        ): RuleResult => {
+          const result = lineNumericRule(
+            ruleCode,
+            ruleName,
+            `${prefix}.${fieldName}`,
+            value,
+          );
+
+          return {
+            ...result,
+            ruleName: `${ruleName} - Line ${lineNumber}`,
+          };
+        };
+
+        results.push(
+          textRule(
+            'UAE-LINE-001',
+            'Invoice line identifier',
+            'lineIdentifier',
+            line.lineIdentifier,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-002',
+            'Invoiced quantity',
+            'quantity',
+            line.quantity,
+          ),
+        );
+
+        results.push(
+          textRule(
+            'UAE-LINE-003',
+            'Unit of measure code',
+            'unitOfMeasureCode',
+            line.unitOfMeasureCode,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-004',
+            'Invoice line net amount',
+            'lineNetAmount',
+            line.lineNetAmount,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-005',
+            'Item net price',
+            'itemNetPrice',
+            line.itemNetPrice,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-006',
+            'Item gross price',
+            'itemGrossPrice',
+            line.itemGrossPrice,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-007',
+            'Item price base quantity',
+            'priceBaseQuantity',
+            line.priceBaseQuantity,
+          ),
+        );
+
+        results.push(
+          textRule(
+            'UAE-LINE-008',
+            'Invoiced item tax category code',
+            'taxCategoryCode',
+            line.taxCategoryCode,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-009',
+            'Invoiced item tax rate',
+            'taxRate',
+            line.taxRate,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-010',
+            'VAT line amount in AED',
+            'vatLineAmountAED',
+            line.vatLineAmountAED,
+          ),
+        );
+
+        results.push(
+          numericRule(
+            'UAE-LINE-011',
+            'Invoice line amount in AED',
+            'lineAmountAED',
+            line.lineAmountAED,
+          ),
+        );
+
+        results.push(
+          textRule(
+            'UAE-LINE-012',
+            'Item name',
+            'itemName',
+            line.itemName,
+          ),
+        );
+
+        results.push(
+          textRule(
+            'UAE-LINE-013',
+            'Item description',
+            'description',
+            line.description,
+          ),
+        );
+      });
+    }
+
+    // Phase 2 - semantic validation
+    results.push(
+      ...this.semanticValidator.evaluate(invoice),
+    );
+
+    // Phase 2 - PINT-AE code-list validation
+    results.push(
+      ...this.codeListValidator.evaluate(invoice),
+    );
+
+    // Phase 2 - UAE conditional validation
+    results.push(
+      ...this.conditionalValidator.evaluate(invoice),
+    );
+    return results;
+  }
+}

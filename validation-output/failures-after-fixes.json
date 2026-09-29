@@ -1,0 +1,26 @@
+﻿[
+    {
+        "Source":  "UAE",
+        "Flag":  "fatal",
+        "Rule":  "ibr-173-ae",
+        "Message":  "[ibr-173-ae]-The value in Seller legal registration identifier type [BTAE-15] scheme identifier [IBT-030-1] should either be \u0027Commercial/Trade license\u0027 or \u0027Emirates ID\u0027 or \u0027Passport\u0027 or \u0027Cabinet decision\u0027 when the value in Seller legal registration identifier (IBT-030) is provided and scheme identifier (IBT-034-1) is \u00270235\u0027 and the Seller country code (IBT-055) is AE.",
+        "Location":  "/*:Invoice[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\u0027][1]/*:AccountingSupplierParty[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]/*:Party[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]",
+        "Test":  "not(cac:PartyLegalEntity/cbc:CompanyID and cbc:EndpointID/@schemeID = \"0235\" and cac:PostalAddress/cac:Country/cbc:IdentificationCode = \"AE\" and not(cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID = (\"TL\", \"EID\", \"PAS\", \"CD\")))"
+    },
+    {
+        "Source":  "UAE",
+        "Flag":  "fatal",
+        "Rule":  "ibr-181-ae",
+        "Message":  "[ibr-181-ae]-When scheme identifier (IBT-034-1) is \u00270235\u0027 and Seller legal registration identifier (ibt-030) is provided, then Seller legal registration identifier type (BTAE-15) MUST be present",
+        "Location":  "/*:Invoice[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\u0027][1]/*:AccountingSupplierParty[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]/*:Party[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]",
+        "Test":  "not(cbc:EndpointID[@schemeID = \"0235\"]) or not(cac:PartyLegalEntity/cbc:CompanyID) or cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID"
+    },
+    {
+        "Source":  "UAE",
+        "Flag":  "fatal",
+        "Rule":  "ibr-180-ae",
+        "Message":  "[ibr-180-ae]-When scheme identifier (IBT-049-1) is \u00270235\u0027 and Buyer legal registration identifier (ibt-047) is provided, then Buyer legal registration identifier type (BTAE-16) MUST be present",
+        "Location":  "/*:Invoice[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\u0027][1]/*:AccountingCustomerParty[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]/*:Party[namespace-uri()=\u0027urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\u0027][1]",
+        "Test":  "not(cbc:EndpointID[@schemeID = \"0235\"] and cac:PartyLegalEntity/cbc:CompanyID) or cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID"
+    }
+]

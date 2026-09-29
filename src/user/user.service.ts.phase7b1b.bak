@@ -1,0 +1,93 @@
+import {
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../prisma/prisma.service.js';
+
+@Injectable()
+export class UserService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    tenantId: string,
+    email: string,
+    firstName: string,
+    lastName: string | undefined,
+    password: string,
+    role: string,
+  ) {
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    return this.prisma.user.create({
+      data: {
+        tenantId,
+        email,
+        firstName,
+        lastName,
+        passwordHash,
+        role,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async findAllByTenant(tenantId: string) {
+    return this.prisma.user.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        tenantId: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async remove(id: string, tenantId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return this.prisma.user.delete({
+      where: { id },
+      select: {
+        id: true,
+        tenantId: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+}

@@ -1,0 +1,450 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Tenant {
+  id             String          @id @default(uuid())
+  name           String
+  slug           String          @unique
+  accessStatus   String          @default("PAID_ACTIVE")
+  trialStartedAt DateTime?
+  trialExpiresAt DateTime?
+  erpEnabled     Boolean         @default(false)
+  productionEnabled Boolean      @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  invoices       Invoice[]
+  users          User[]
+  aspSubmissions         AspSubmission[]
+  integrationConnections IntegrationConnection[]
+  integrationSyncRuns     IntegrationSyncRun[]
+  externalInvoiceLinks    ExternalInvoiceLink[]
+
+  @@index([accessStatus, trialExpiresAt])
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String
+  email        String    @unique
+  googleSubject String?   @unique
+  firstName    String
+  lastName     String?
+  role         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  passwordHash String?
+  invoices     Invoice[]
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+  // MFA enrollment and session invalidation
+  mfaEnabled                Boolean   @default(false)
+  mfaSecretEncrypted        String?
+  mfaPendingSecretEncrypted String?
+  mfaPendingExpiresAt       DateTime?
+  mfaLastUsedStep            BigInt?
+  mfaFailedAttempts         Int       @default(0)
+  mfaLockedUntil            DateTime?
+  authVersion               Int       @default(0)
+  mfaChallenges             MfaChallenge[]
+  mfaRecoveryCodes          MfaRecoveryCode[]
+
+}
+
+model Invoice {
+  id               String   @id @default(uuid())
+  tenantId         String
+  uploadedById     String
+  invoiceNumber    String
+  invoiceDate      DateTime
+  currency         String
+  totalAmount      Decimal
+  status           String
+  complianceStatus String   @default("PENDING")
+
+  // UAE / PINT-AE invoice-level structured data
+  jurisdiction             String?
+  invoiceTypeCode          String?
+  transactionTypeCode      String?
+  paymentDueDate           DateTime?
+  businessProcessType      String?
+  specificationIdentifier  String?
+  paymentMeansTypeCode     String?
+  paymentAccountIdentifier String?
+
+  // UAE / PINT-AE Credit Note data
+  creditNoteReasonCode      String?
+  creditNoteReasonText      String?
+  precedingInvoiceReference String?
+
+  // Structured monetary totals
+  lineNetTotal    Decimal?
+  allowanceTotal  Decimal?
+  chargeTotal     Decimal?
+  totalWithoutTax Decimal?
+  totalTaxAmount  Decimal?
+  totalWithTax    Decimal?
+  paidAmount      Decimal?
+  roundingAmount  Decimal?
+  amountDue       Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  uploadedBy        User                      @relation(fields: [uploadedById], references: [id])
+  documents         InvoiceDocument[]
+  lines             InvoiceLine[]
+  parties           InvoiceParty[]
+  taxBreakdowns     InvoiceTaxBreakdown[]
+  allowanceCharges  InvoiceAllowanceCharge[]
+  complianceResults InvoiceComplianceResult[]
+  auditEvents       InvoiceAuditEvent[]
+  aspSubmissions       AspSubmission[]
+  externalInvoiceLinks ExternalInvoiceLink[]
+}
+
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Decimal
+  unitPrice   Decimal
+  taxAmount   Decimal
+  lineTotal   Decimal
+
+  // UAE / PINT-AE structured line data
+  lineIdentifier         String?
+  unitOfMeasureCode      String?
+  lineNetAmount          Decimal?
+  itemNetPrice           Decimal?
+  itemGrossPrice         Decimal?
+  priceBaseQuantity      Decimal?
+  taxCategoryCode        String?
+  taxRate                Decimal?
+  vatExemptionReasonCode String?
+  vatExemptionReasonText String?
+  vatLineAmountAED       Decimal?
+  lineAmountAED          Decimal?
+  itemName               String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model InvoiceParty {
+  id        String @id @default(uuid())
+  invoiceId String
+  role      String
+
+  name                            String?
+  electronicAddress               String?
+  electronicIdentifier            String?
+  legalRegistrationIdentifier     String?
+  legalRegistrationIdentifierType String?
+  legalRegistrationAuthorityName  String?
+  taxIdentifier                   String?
+  taxSchemeCode                   String?
+
+  addressLine1       String?
+  city               String?
+  countrySubdivision String?
+  countryCode        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([invoiceId, role])
+}
+
+model InvoiceAllowanceCharge {
+  id        String  @id @default(uuid())
+  invoiceId String
+  type      String
+  amount    Decimal
+
+  reasonCode      String?
+  reasonText      String?
+  baseAmount      Decimal?
+  percentage      Decimal?
+  taxCategoryCode String?
+  taxRate         Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([invoiceId, type])
+}
+
+model InvoiceTaxBreakdown {
+  id                     String   @id @default(uuid())
+  invoiceId              String
+  taxableAmount          Decimal?
+  taxAmount              Decimal?
+  categoryCode           String?
+  taxRate                Decimal?
+  vatExemptionReasonCode String?
+  vatExemptionReasonText String?
+  createdAt              DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model InvoiceDocument {
+  id           String   @id @default(uuid())
+  invoiceId    String
+  tenantId     String
+  uploadedById String
+  originalName String
+  storageKey   String
+  mimeType     String
+  fileSize     Int
+  status       String   @default("UPLOADED")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id])
+}
+
+model InvoiceComplianceResult {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  tenantId    String
+  rulePack    String   @default("GENERIC")
+  ruleCode    String
+  ruleName    String
+  status      String
+  severity    String
+  message     String?
+  field       String?
+  actualValue String?
+  createdAt   DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([invoiceId, rulePack])
+  @@index([invoiceId, rulePack, status])
+}
+
+model InvoiceAuditEvent {
+  id         String   @id @default(uuid())
+  invoiceId  String
+  tenantId   String
+  userId     String?
+  action     String
+  fromStatus String?
+  toStatus   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([createdAt])
+}
+
+model AspSubmission {
+  id                String    @id @default(uuid())
+  invoiceId         String
+  tenantId          String
+  provider          String
+  documentType      String
+  documentNumber    String
+  status            String    @default("CREATED")
+  idempotencyKey    String    @unique
+  providerReference String?
+  attemptCount      Int       @default(0)
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  submittedAt       DateTime?
+  acceptedAt        DateTime?
+  rejectedAt        DateTime?
+  completedAt       DateTime?
+
+  invoice  Invoice                @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attempts AspSubmissionAttempt[]
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([invoiceId, status])
+  @@index([tenantId, status])
+  @@index([provider, providerReference])
+  @@index([createdAt])
+}
+
+model AspSubmissionAttempt {
+  id                String    @id @default(uuid())
+  submissionId      String
+  attemptNumber     Int
+  status            String
+  providerReference String?
+  message           String?
+  errorCode         String?
+  errorMessage      String?
+  startedAt         DateTime  @default(now())
+  completedAt       DateTime?
+
+  submission AspSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, attemptNumber])
+  @@index([submissionId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+
+model MfaChallenge {
+  id          String    @id @default(uuid())
+  userId      String
+  tokenHash   String    @unique
+  authVersion Int
+  attempts    Int       @default(0)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  actorUserId String?
+  actorEmail  String?
+  actorRole   String?
+  category    String
+  action      String
+  entityType  String
+  entityId    String?
+  entityLabel String?
+  outcome     String   @default("SUCCESS")
+  before      Json?
+  after       Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, category, createdAt])
+  @@index([tenantId, action, createdAt])
+  @@index([tenantId, entityType, entityId, createdAt])
+}
+
+model IntegrationConnection {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  provider             String
+  name                 String
+  baseUrl              String
+  authType             String
+  config               Json?
+  credentialsEncrypted String   @db.Text
+  isActive             Boolean  @default(true)
+  lastTestedAt         DateTime?
+  lastTestSucceeded    Boolean?
+  lastError            String?  @db.Text
+  createdById          String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  syncRuns     IntegrationSyncRun[]
+  invoiceLinks ExternalInvoiceLink[]
+
+  @@unique([tenantId, provider, name])
+  @@index([tenantId])
+  @@index([tenantId, provider])
+  @@index([tenantId, isActive])
+}
+
+model IntegrationSyncRun {
+  id            String    @id @default(uuid())
+  tenantId      String
+  connectionId  String
+  direction     String
+  operation     String
+  status        String
+  requestedById String
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  cursor        String?
+  importedCount Int       @default(0)
+  skippedCount  Int       @default(0)
+  failedCount   Int       @default(0)
+  pushedCount   Int       @default(0)
+  errorMessage  String?   @db.Text
+  metadata      Json?
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startedAt])
+  @@index([connectionId, startedAt])
+  @@index([tenantId, status])
+}
+
+model ExternalInvoiceLink {
+  id                    String    @id @default(uuid())
+  tenantId              String
+  connectionId          String
+  invoiceId             String
+  externalInvoiceId     String
+  externalInvoiceNumber String?
+  externalStatus        String?
+  externalVersion       String?
+  lastPulledAt          DateTime?
+  lastPushedAt          DateTime?
+  lastPushedStatus            String?
+  lastPushedSubmissionId      String?
+  lastPushedProviderReference String?
+  writebackKey                String?
+  writebackState              String?
+  writebackClaimedAt          DateTime?
+  writebackLastError          String?   @db.Text
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  invoice    Invoice               @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalInvoiceId])
+  @@unique([connectionId, invoiceId])
+  @@index([tenantId])
+  @@index([invoiceId])
+  @@index([tenantId, externalStatus])
+  @@index([tenantId, lastPushedStatus])
+  @@index([tenantId, writebackState])
+}

@@ -1,0 +1,169 @@
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+import { readFile } from 'fs/promises';
+import { XMLParser } from 'fast-xml-parser';
+import { parse } from 'csv-parse/sync';
+
+@Injectable()
+export class InvoiceFileValidatorService {
+  async validate(
+    filePath: string,
+    extension: string,
+  ): Promise<void> {
+    const normalizedExtension = extension.toLowerCase();
+
+    switch (normalizedExtension) {
+      case '.pdf':
+        await this.validatePdf(filePath);
+        break;
+
+      case '.xml':
+        await this.validateXml(filePath);
+        break;
+
+      case '.json':
+        await this.validateJson(filePath);
+        break;
+
+      case '.csv':
+        await this.validateCsv(filePath);
+        break;
+
+      default:
+        throw new BadRequestException(
+          'Unsupported invoice file format',
+        );
+    }
+  }
+
+  private async validatePdf(filePath: string): Promise<void> {
+    const buffer = await readFile(filePath);
+
+    const pdfHeader = buffer.subarray(0, 5).toString('ascii');
+
+    if (pdfHeader !== '%PDF-') {
+      throw new BadRequestException(
+        'Uploaded file is not a valid PDF',
+      );
+    }
+  }
+
+  private async validateXml(filePath: string): Promise<void> {
+    const content = await readFile(filePath, 'utf8');
+
+    if (!content.trim()) {
+      throw new BadRequestException(
+        'XML invoice file is empty',
+      );
+    }
+
+    try {
+      const parser = new XMLParser({
+        ignoreAttributes: false,
+        processEntities: false,
+      });
+
+      const parsed = parser.parse(content);
+
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Invalid XML structure');
+      }
+    } catch {
+      throw new BadRequestException(
+        'Uploaded file contains invalid XML',
+      );
+    }
+  }
+
+  private async validateJson(filePath: string): Promise<void> {
+    const buffer = await readFile(filePath);
+
+    const hasUtf8Bom =
+      buffer.length >= 3 &&
+      buffer[0] === 0xef &&
+      buffer[1] === 0xbb &&
+      buffer[2] === 0xbf;
+
+    const content = (
+      hasUtf8Bom
+        ? buffer.subarray(3)
+        : buffer
+    ).toString('utf8');
+
+    if (!content.trim()) {
+      throw new BadRequestException(
+        'JSON invoice file is empty',
+      );
+    }
+
+    try {
+      const parsed = JSON.parse(content);
+
+      if (
+        parsed === null ||
+        typeof parsed !== 'object'
+      ) {
+        throw new Error('Invalid JSON structure');
+      }
+    } catch {
+      throw new BadRequestException(
+        'Uploaded file contains invalid JSON',
+      );
+    }
+  }
+
+  private async validateCsv(filePath: string): Promise<void> {
+    const content = await readFile(filePath, 'utf8');
+
+    if (!content.trim()) {
+      throw new BadRequestException(
+        'CSV invoice file is empty',
+      );
+    }
+
+    try {
+      const rawRows = parse(content, {
+        bom: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as string[][];
+
+      if (!rawRows.length) {
+        throw new Error('CSV contains no records');
+      }
+
+      const headers = rawRows[0].map(
+        (header) => header.trim(),
+      );
+
+      const seenHeaders = new Set<string>();
+
+      for (const header of headers) {
+        if (seenHeaders.has(header)) {
+          throw new Error(
+            `Duplicate CSV header: ${header}`,
+          );
+        }
+
+        seenHeaders.add(header);
+      }
+
+      const records = parse(content, {
+        columns: true,
+        skip_empty_lines: true,
+        bom: true,
+        trim: true,
+      });
+
+      if (!records || records.length === 0) {
+        throw new Error('CSV contains no records');
+      }
+    } catch {
+      throw new BadRequestException(
+        'Uploaded file contains invalid CSV',
+      );
+    }
+  }
+}

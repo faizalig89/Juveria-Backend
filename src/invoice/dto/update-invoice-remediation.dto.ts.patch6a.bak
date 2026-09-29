@@ -1,0 +1,106 @@
+﻿import {
+  IsDateString,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
+
+export class UpdateInvoiceRemediationDto {
+  @IsOptional()
+  @IsString()
+  invoiceNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  invoiceDate?: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  jurisdiction?: string;
+
+  @IsOptional()
+  @IsString()
+  invoiceTypeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  transactionTypeCode?: string;
+
+  @IsOptional()
+  @IsDateString()
+  paymentDueDate?: string;
+
+  @IsOptional()
+  @IsString()
+  businessProcessType?: string;
+
+  @IsOptional()
+  @IsString()
+  specificationIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentMeansTypeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentAccountIdentifier?: string;
+
+  @IsOptional()
+  @IsString()
+  creditNoteReasonCode?: string;
+
+  @IsOptional()
+  @IsString()
+  creditNoteReasonText?: string;
+
+  @IsOptional()
+  @IsString()
+  precedingInvoiceReference?: string;
+
+  @IsOptional()
+  @IsNumber()
+  lineNetTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  allowanceTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  chargeTotal?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalWithoutTax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalTaxAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  totalWithTax?: number;
+
+  @IsOptional()
+  @IsNumber()
+  paidAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  roundingAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  amountDue?: number;
+}

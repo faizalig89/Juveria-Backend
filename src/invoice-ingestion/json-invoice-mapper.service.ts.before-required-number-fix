@@ -1,0 +1,622 @@
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+
+import type {
+  IngestedInvoice,
+  InvoiceIngestionResult,
+} from './invoice-ingestion.types.js';
+
+@Injectable()
+export class JsonInvoiceMapperService {
+  map(input: unknown): InvoiceIngestionResult {
+    if (
+      input === null ||
+      typeof input !== 'object' ||
+      Array.isArray(input)
+    ) {
+      throw new BadRequestException(
+        'JSON invoice must be an object',
+      );
+    }
+
+    const source = input as Record<string, unknown>;
+    const warnings: string[] = [];
+
+    const invoiceNumber = this.requiredString(
+      source.invoiceNumber,
+      'invoiceNumber',
+    );
+
+    const invoiceDate = this.requiredDate(
+      source.invoiceDate,
+      'invoiceDate',
+    );
+
+    const currency = this.requiredCurrency(
+      source.currency,
+      'currency',
+    );
+
+    const totalAmount = this.requiredNumber(
+      source.totalAmount,
+      'totalAmount',
+    );
+
+    const invoice: IngestedInvoice = {
+      invoiceNumber,
+      invoiceDate,
+      currency,
+      totalAmount,
+
+      jurisdiction: this.optionalString(
+        source.jurisdiction,
+      ),
+      invoiceTypeCode: this.optionalString(
+        source.invoiceTypeCode,
+      ),
+      transactionTypeCode: this.optionalString(
+        source.transactionTypeCode,
+      ),
+      paymentDueDate: this.optionalDate(
+        source.paymentDueDate,
+        'paymentDueDate',
+      ),
+      businessProcessType: this.optionalString(
+        source.businessProcessType,
+      ),
+      specificationIdentifier: this.optionalString(
+        source.specificationIdentifier,
+      ),
+      paymentMeansTypeCode: this.optionalString(
+        source.paymentMeansTypeCode,
+      ),
+      paymentAccountIdentifier: this.optionalString(
+        source.paymentAccountIdentifier,
+      ),
+
+      creditNoteReasonCode: this.optionalString(
+        source.creditNoteReasonCode,
+      ),
+      creditNoteReasonText: this.optionalString(
+        source.creditNoteReasonText,
+      ),
+      precedingInvoiceReference: this.optionalString(
+        source.precedingInvoiceReference,
+      ),
+
+      lineNetTotal: this.optionalNumber(
+        source.lineNetTotal,
+        'lineNetTotal',
+      ),
+      allowanceTotal: this.optionalNumber(
+        source.allowanceTotal,
+        'allowanceTotal',
+      ),
+      chargeTotal: this.optionalNumber(
+        source.chargeTotal,
+        'chargeTotal',
+      ),
+      totalWithoutTax: this.optionalNumber(
+        source.totalWithoutTax,
+        'totalWithoutTax',
+      ),
+      totalTaxAmount: this.optionalNumber(
+        source.totalTaxAmount,
+        'totalTaxAmount',
+      ),
+      totalWithTax: this.optionalNumber(
+        source.totalWithTax,
+        'totalWithTax',
+      ),
+      paidAmount: this.optionalNumber(
+        source.paidAmount,
+        'paidAmount',
+      ),
+      roundingAmount: this.optionalNumber(
+        source.roundingAmount,
+        'roundingAmount',
+      ),
+      amountDue: this.optionalNumber(
+        source.amountDue,
+        'amountDue',
+      ),
+    };
+
+    if (Array.isArray(source.parties)) {
+      invoice.parties = source.parties.map(
+        (party, index) =>
+          this.mapParty(party, index),
+      );
+    } else if (source.parties !== undefined) {
+      warnings.push(
+        'parties was ignored because it is not an array',
+      );
+    }
+
+    if (Array.isArray(source.taxBreakdowns)) {
+      invoice.taxBreakdowns =
+        source.taxBreakdowns.map(
+          (tax, index) =>
+            this.mapTaxBreakdown(tax, index),
+        );
+    } else if (
+      source.taxBreakdowns !== undefined
+    ) {
+      warnings.push(
+        'taxBreakdowns was ignored because it is not an array',
+      );
+    }
+
+    if (Array.isArray(source.lines)) {
+      invoice.lines = source.lines.map(
+        (line, index) =>
+          this.mapLine(line, index),
+      );
+    } else if (source.lines !== undefined) {
+      warnings.push(
+        'lines was ignored because it is not an array',
+      );
+    }
+
+    if (
+      Array.isArray(source.allowanceCharges)
+    ) {
+      invoice.allowanceCharges =
+        source.allowanceCharges.map(
+          (item, index) =>
+            this.mapAllowanceCharge(
+              item,
+              index,
+            ),
+        );
+    } else if (
+      source.allowanceCharges !== undefined
+    ) {
+      warnings.push(
+        'allowanceCharges was ignored because it is not an array',
+      );
+    }
+
+    return {
+      source: 'JSON',
+      invoice,
+      warnings,
+    };
+  }
+
+  private mapParty(
+    value: unknown,
+    index: number,
+  ) {
+    const item = this.object(
+      value,
+      `parties[${index}]`,
+    );
+
+    const role = this.requiredString(
+      item.role,
+      `parties[${index}].role`,
+    );
+
+    if (
+      role !== 'SELLER' &&
+      role !== 'BUYER'
+    ) {
+      throw new BadRequestException(
+        `parties[${index}].role must be SELLER or BUYER`,
+      );
+    }
+
+    return {
+      role: role as 'SELLER' | 'BUYER',
+      name: this.optionalString(item.name),
+      electronicAddress:
+        this.optionalString(
+          item.electronicAddress,
+        ),
+      electronicIdentifier:
+        this.optionalString(
+          item.electronicIdentifier,
+        ),
+      legalRegistrationIdentifier:
+        this.optionalString(
+          item.legalRegistrationIdentifier,
+        ),
+      legalRegistrationIdentifierType:
+        this.optionalString(
+          item.legalRegistrationIdentifierType,
+        ),
+      legalRegistrationAuthorityName:
+        this.optionalString(
+          item.legalRegistrationAuthorityName,
+        ),
+      taxIdentifier:
+        this.optionalString(
+          item.taxIdentifier,
+        ),
+      taxSchemeCode:
+        this.optionalString(
+          item.taxSchemeCode,
+        ),
+      addressLine1:
+        this.optionalString(
+          item.addressLine1,
+        ),
+      city: this.optionalString(item.city),
+      countrySubdivision:
+        this.optionalString(
+          item.countrySubdivision,
+        ),
+      countryCode:
+        this.optionalString(
+          item.countryCode,
+        ),
+    };
+  }
+
+  private mapTaxBreakdown(
+    value: unknown,
+    index: number,
+  ) {
+    const item = this.object(
+      value,
+      `taxBreakdowns[${index}]`,
+    );
+
+    return {
+      taxableAmount:
+        this.optionalNumber(
+          item.taxableAmount,
+          `taxBreakdowns[${index}].taxableAmount`,
+        ),
+      taxAmount:
+        this.optionalNumber(
+          item.taxAmount,
+          `taxBreakdowns[${index}].taxAmount`,
+        ),
+      categoryCode:
+        this.optionalString(
+          item.categoryCode,
+        ),
+      taxRate:
+        this.optionalNumber(item.taxRate, `taxBreakdowns[$index].taxRate`),
+      vatExemptionReasonCode:
+        this.optionalString(
+          item.vatExemptionReasonCode,
+        ),
+      vatExemptionReasonText:
+        this.optionalString(
+          item.vatExemptionReasonText,
+        ),
+    };
+  }
+
+  private mapLine(
+    value: unknown,
+    index: number,
+  ) {
+    const item = this.object(
+      value,
+      `lines[${index}]`,
+    );
+
+    return {
+      description: this.requiredString(
+        item.description,
+        `lines[${index}].description`,
+      ),
+      quantity: this.requiredNumber(
+        item.quantity,
+        `lines[${index}].quantity`,
+      ),
+      unitPrice: this.requiredNumber(
+        item.unitPrice,
+        `lines[${index}].unitPrice`,
+      ),
+      taxAmount: this.requiredNumber(
+        item.taxAmount,
+        `lines[${index}].taxAmount`,
+      ),
+      lineTotal: this.requiredNumber(
+        item.lineTotal,
+        `lines[${index}].lineTotal`,
+      ),
+
+      lineIdentifier:
+        this.optionalString(
+          item.lineIdentifier,
+        ),
+      unitOfMeasureCode:
+        this.optionalString(
+          item.unitOfMeasureCode,
+        ),
+      lineNetAmount:
+        this.optionalNumber(
+          item.lineNetAmount,
+          `lines[${index}].lineNetAmount`,
+        ),
+      itemNetPrice:
+        this.optionalNumber(
+          item.itemNetPrice,
+          `lines[${index}].itemNetPrice`,
+        ),
+      itemGrossPrice:
+        this.optionalNumber(
+          item.itemGrossPrice,
+          `lines[${index}].itemGrossPrice`,
+        ),
+      priceBaseQuantity:
+        this.optionalNumber(
+          item.priceBaseQuantity,
+          `lines[${index}].priceBaseQuantity`,
+        ),
+      taxCategoryCode:
+        this.optionalString(
+          item.taxCategoryCode,
+        ),
+      taxRate:
+        this.optionalNumber(item.taxRate, `taxBreakdowns[$index].taxRate`),
+      vatExemptionReasonCode:
+        this.optionalString(
+          item.vatExemptionReasonCode,
+        ),
+      vatExemptionReasonText:
+        this.optionalString(
+          item.vatExemptionReasonText,
+        ),
+      vatLineAmountAED:
+        this.optionalNumber(
+          item.vatLineAmountAED,
+          `lines[${index}].vatLineAmountAED`,
+        ),
+      lineAmountAED:
+        this.optionalNumber(
+          item.lineAmountAED,
+          `lines[${index}].lineAmountAED`,
+        ),
+      itemName:
+        this.optionalString(item.itemName),
+    };
+  }
+
+  private mapAllowanceCharge(
+    value: unknown,
+    index: number,
+  ) {
+    const item = this.object(
+      value,
+      `allowanceCharges[${index}]`,
+    );
+
+    const type = this.requiredString(
+      item.type,
+      `allowanceCharges[${index}].type`,
+    );
+
+    if (
+      type !== 'ALLOWANCE' &&
+      type !== 'CHARGE'
+    ) {
+      throw new BadRequestException(
+        `allowanceCharges[${index}].type must be ALLOWANCE or CHARGE`,
+      );
+    }
+
+    return {
+      type: type as 'ALLOWANCE' | 'CHARGE',
+      amount: this.requiredNumber(
+        item.amount,
+        `allowanceCharges[${index}].amount`,
+      ),
+      reasonCode:
+        this.optionalString(
+          item.reasonCode,
+        ),
+      reasonText:
+        this.optionalString(
+          item.reasonText,
+        ),
+      baseAmount:
+        this.optionalNumber(
+          item.baseAmount,
+          `allowanceCharges[${index}].baseAmount`,
+        ),
+      percentage:
+        this.optionalNumber(
+          item.percentage,
+          `allowanceCharges[${index}].percentage`,
+        ),
+      taxCategoryCode:
+        this.optionalString(
+          item.taxCategoryCode,
+        ),
+      taxRate:
+        this.optionalNumber(item.taxRate, `taxBreakdowns[$index].taxRate`),
+    };
+  }
+
+  private object(
+    value: unknown,
+    field: string,
+  ): Record<string, unknown> {
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      throw new BadRequestException(
+        `${field} must be an object`,
+      );
+    }
+
+    return value as Record<
+      string,
+      unknown
+    >;
+  }
+
+  private requiredString(
+    value: unknown,
+    field: string,
+  ): string {
+    if (
+      typeof value !== 'string' ||
+      !value.trim()
+    ) {
+      throw new BadRequestException(
+        `${field} is required`,
+      );
+    }
+
+    return value.trim();
+  }
+
+  private optionalString(
+    value: unknown,
+  ): string | undefined {
+    if (
+      typeof value !== 'string' ||
+      !value.trim()
+    ) {
+      return undefined;
+    }
+
+    return value.trim();
+  }
+
+  private requiredNumber(
+    value: unknown,
+    field: string,
+  ): number {
+    const result =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string' &&
+            value.trim()
+          ? Number(value)
+          : Number.NaN;
+
+    if (!Number.isFinite(result)) {
+      throw new BadRequestException(
+        `${field} must be a number`,
+      );
+    }
+
+    return result;
+  }
+
+  private optionalNumber(
+    value: unknown,
+    field: string,
+  ): number | undefined {
+    if (
+      value === undefined ||
+      value === null ||
+      value === ''
+    ) {
+      return undefined;
+    }
+
+    const result =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string' &&
+            value.trim()
+          ? Number(value)
+          : Number.NaN;
+
+    if (!Number.isFinite(result)) {
+      throw new BadRequestException(
+        `${field} must be a number`,
+      );
+    }
+
+    return result;
+  }
+
+  private requiredDate(
+    value: unknown,
+    field: string,
+  ): string {
+    const date = this.requiredString(
+      value,
+      field,
+    );
+
+    if (!this.isIsoDate(date)) {
+      throw new BadRequestException(
+        `${field} must be a valid YYYY-MM-DD date`,
+      );
+    }
+
+    return date;
+  }
+
+  private optionalDate(
+    value: unknown,
+    field: string,
+  ): string | undefined {
+    if (
+      value === undefined ||
+      value === null ||
+      value === ''
+    ) {
+      return undefined;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException(
+        `${field} must be a valid YYYY-MM-DD date`,
+      );
+    }
+
+    const date = value.trim();
+
+    if (!this.isIsoDate(date)) {
+      throw new BadRequestException(
+        `${field} must be a valid YYYY-MM-DD date`,
+      );
+    }
+
+    return date;
+  }
+
+  private requiredCurrency(
+    value: unknown,
+    field: string,
+  ): string {
+    const currency = this.requiredString(
+      value,
+      field,
+    ).toUpperCase();
+
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      throw new BadRequestException(
+        `${field} must be a 3-letter currency code`,
+      );
+    }
+
+    return currency;
+  }
+
+  private isIsoDate(value: string): boolean {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return false;
+    }
+
+    const [year, month, day] =
+      value.split('-').map(Number);
+
+    const date = new Date(
+      Date.UTC(year, month - 1, day),
+    );
+
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
+    );
+  }
+}

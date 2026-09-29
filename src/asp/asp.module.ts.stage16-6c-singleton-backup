@@ -1,0 +1,27 @@
+﻿import { Module } from '@nestjs/common';
+import { ComplianceModule } from '../compliance/compliance.module.js';
+import { AuthModule } from '../auth/auth.module.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { AspController } from './asp.controller.js';
+import { AspService } from './asp.service.js';
+import { MockAspAdapter } from './adapters/mock-asp.adapter.js';
+import { ASP_ADAPTER } from './contracts/asp.tokens.js';
+
+@Module({
+  imports: [AuthModule, ComplianceModule],
+  controllers: [AspController],
+  providers: [
+    PrismaService,
+    AspService,
+    MockAspAdapter,
+    {
+      provide: ASP_ADAPTER,
+      useExisting: MockAspAdapter,
+    },
+  ],
+  exports: [
+    ASP_ADAPTER,
+    AspService,
+  ],
+})
+export class AspModule {}

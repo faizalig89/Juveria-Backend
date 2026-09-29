@@ -1,0 +1,433 @@
+import {
+  CsvInvoiceMapperService,
+} from './csv-invoice-mapper.service.js';
+
+describe('CsvInvoiceMapperService', () => {
+  const mapper =
+    new CsvInvoiceMapperService();
+
+  it('maps a single-line CSV invoice', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,jurisdiction,invoiceTypeCode,transactionTypeCode,sellerName,sellerCountryCode,buyerName,buyerCountryCode,totalTaxAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-001,2026-09-25,AED,1050,AE,380,00000000,Test Seller LLC,AE,Test Buyer LLC,AE,50,Consulting Services,1,1000,50,1050',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.source).toBe('CSV');
+    expect(
+      result.invoice.invoiceNumber,
+    ).toBe('CSV-TEST-001');
+
+    expect(result.invoice.currency)
+      .toBe('AED');
+
+    expect(result.invoice.parties)
+      .toHaveLength(2);
+
+    expect(result.invoice.lines)
+      .toHaveLength(1);
+
+    expect(result.invoice.totalTaxAmount)
+      .toBe(50);
+  });
+
+  it('maps multiple rows as multiple invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-002,2026-09-25,AED,210,Service A,1,100,5,105',
+      'CSV-TEST-002,2026-09-25,AED,210,Service B,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.lines)
+      .toHaveLength(2);
+  });
+
+  it('accepts UTF-8 BOM CSV', () => {
+    const csv =
+      '\uFEFF' +
+      [
+        'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+        'CSV-BOM-001,2026-09-25,AED,105,Service,1,100,5,105',
+      ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(
+      result.invoice.invoiceNumber,
+    ).toBe('CSV-BOM-001');
+  });
+
+  it('rejects multiple invoices in one upload', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-A,2026-09-25,AED,105,Service A,1,100,5,105',
+      'CSV-B,2026-09-25,AED,105,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV upload must contain exactly one invoice',
+    );
+  });
+
+  it('rejects inconsistent repeated header data', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-003,2026-09-25,AED,210,Service A,1,100,5,105',
+      'CSV-TEST-003,2026-09-26,AED,210,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent invoiceDate',
+    );
+  });
+
+  it('rejects malformed numeric data through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-004,2026-09-25,AED,abc,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'totalAmount must be a number',
+    );
+  });
+
+  it('rejects invalid dates through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-005,2026-02-30,AED,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'invoiceDate must be a valid YYYY-MM-DD date',
+    );
+  });
+
+  it('normalizes currency through canonical validation', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-TEST-006,2026-09-25,aed,105,Service,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.currency)
+      .toBe('AED');
+  });
+
+  it('keeps consistent repeated data across multiple lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,totalTaxAmount,sellerTaxIdentifier,buyerTaxIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-001,2026-09-25,AED,210,10,100000000000003,100000000000003,Service A,1,100,5,105',
+      'CSV-MULTI-001,2026-09-25,AED,210,10,100000000000003,100000000000003,Service B,1,100,5,105',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.invoiceNumber)
+      .toBe('CSV-MULTI-001');
+
+    expect(result.invoice.lines)
+      .toHaveLength(2);
+
+    expect(result.invoice.totalTaxAmount)
+      .toBe(10);
+  });
+
+  it('rejects inconsistent seller data across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,sellerTaxIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-002,2026-09-25,AED,210,100000000000003,Service A,1,100,5,105',
+      'CSV-MULTI-002,2026-09-25,AED,210,100000000000004,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent sellerTaxIdentifier',
+    );
+  });
+
+  it('rejects inconsistent monetary totals across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,totalTaxAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-003,2026-09-25,AED,210,10,Service A,1,100,5,105',
+      'CSV-MULTI-003,2026-09-25,AED,210,11,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent totalTaxAmount',
+    );
+  });
+
+  it('rejects inconsistent buyer data across invoice lines', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,buyerLegalRegistrationIdentifier,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-MULTI-004,2026-09-25,AED,210,BUYER-001,Service A,1,100,5,105',
+      'CSV-MULTI-004,2026-09-25,AED,210,BUYER-002,Service B,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has inconsistent buyerLegalRegistrationIdentifier',
+    );
+  });
+
+
+  it('rejects duplicate CSV headers before mapping', () => {
+    const csv = [
+      'invoiceNumber,invoiceNumber,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'INV-001,INV-999,AED,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'Duplicate CSV header: invoiceNumber',
+    );
+  });
+
+
+  it('rejects missing invoice number', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      ',2026-09-25,AED,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('invoiceNumber is required');
+  });
+
+  it('rejects missing invoice date', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-002,,AED,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('invoiceDate is required');
+  });
+
+  it('rejects missing currency', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-003,2026-09-25,,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('currency is required');
+  });
+
+  it('rejects missing total amount', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-004,2026-09-25,AED,,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('totalAmount is required');
+  });
+
+  it('rejects missing line description', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-005,2026-09-25,AED,105,,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('CSV row 2: lineDescription is required');
+  });
+
+  it('rejects missing line quantity', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-006,2026-09-25,AED,105,Service,,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('CSV row 2: lineQuantity is required');
+  });
+
+  it('rejects missing line unit price', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-007,2026-09-25,AED,105,Service,1,,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('CSV row 2: lineUnitPrice is required');
+  });
+
+  it('rejects missing line tax amount', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-008,2026-09-25,AED,105,Service,1,100,,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('CSV row 2: lineTaxAmount is required');
+  });
+
+  it('rejects missing line total', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-009,2026-09-25,AED,105,Service,1,100,5,',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('CSV row 2: lineTotal is required');
+  });
+
+  it('rejects malformed currency', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal',
+      'CSV-REQ-010,2026-09-25,AED1,105,Service,1,100,5,105',
+    ].join('\n');
+
+    expect(() => mapper.map(csv))
+      .toThrow('currency must be a 3-letter currency code');
+  });
+
+
+  it('maps different VAT category/rate groups as separate tax breakdowns', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-001,2026-09-25,AED,105,100,5,S,5,Standard Service,1,100,5,105,100,S,5',
+      'CSV-TAX-001,2026-09-25,AED,105,50,0,Z,0,Zero Rated Service,1,50,0,50,50,Z,0',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.taxBreakdowns)
+      .toHaveLength(2);
+
+    expect(result.invoice.taxBreakdowns)
+      .toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            categoryCode: 'S',
+            taxRate: 5,
+            taxableAmount: 100,
+            taxAmount: 5,
+          }),
+          expect.objectContaining({
+            categoryCode: 'Z',
+            taxRate: 0,
+            taxableAmount: 50,
+            taxAmount: 0,
+          }),
+        ]),
+      );
+  });
+
+  it('deduplicates identical repeated tax breakdowns', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-002,2026-09-25,AED,210,200,10,S,5,Service A,1,100,5,105,100,S,5',
+      'CSV-TAX-002,2026-09-25,AED,210,200,10,S,5,Service B,1,100,5,105,100,S,5',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.taxBreakdowns)
+      .toHaveLength(1);
+
+    expect(result.invoice.taxBreakdowns?.[0])
+      .toEqual(
+        expect.objectContaining({
+          categoryCode: 'S',
+          taxRate: 5,
+          taxableAmount: 200,
+          taxAmount: 10,
+        }),
+      );
+  });
+
+  it('rejects conflicting taxable amount for the same tax group', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-003,2026-09-25,AED,210,200,10,S,5,Service A,1,100,5,105,100,S,5',
+      'CSV-TAX-003,2026-09-25,AED,210,100,10,S,5,Service B,1,100,5,105,100,S,5',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has conflicting tax breakdown for category S rate 5',
+    );
+  });
+
+  it('rejects conflicting tax amount for the same tax group', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-004,2026-09-25,AED,210,200,10,S,5,Service A,1,100,5,105,100,S,5',
+      'CSV-TAX-004,2026-09-25,AED,210,200,11,S,5,Service B,1,100,5,105,100,S,5',
+    ].join('\n');
+
+    expect(() =>
+      mapper.map(csv),
+    ).toThrow(
+      'CSV row 3 has conflicting tax breakdown for category S rate 5',
+    );
+  });
+
+  it('preserves one tax breakdown for a single tax group', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-005,2026-09-25,AED,105,100,5,S,5,Service,1,100,5,105,100,S,5',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.taxBreakdowns)
+      .toHaveLength(1);
+
+    expect(result.invoice.taxBreakdowns?.[0])
+      .toEqual(
+        expect.objectContaining({
+          categoryCode: 'S',
+          taxRate: 5,
+          taxableAmount: 100,
+          taxAmount: 5,
+        }),
+      );
+  });
+
+
+
+  it('treats equivalent numeric tax representations as the same tax group', () => {
+    const csv = [
+      'invoiceNumber,invoiceDate,currency,totalAmount,taxableAmount,taxBreakdownAmount,taxCategoryCode,taxRate,lineDescription,lineQuantity,lineUnitPrice,lineTaxAmount,lineTotal,lineNetAmount,lineTaxCategoryCode,lineTaxRate',
+      'CSV-TAX-006,2026-09-25,AED,210,200,10,S,5,Service A,1,100,5,105,100,S,5',
+      'CSV-TAX-006,2026-09-25,AED,210,200.00,10.00,S,5.0,Service B,1,100,5,105,100,S,5.0',
+    ].join('\n');
+
+    const result = mapper.map(csv);
+
+    expect(result.invoice.taxBreakdowns).toHaveLength(1);
+
+    expect(result.invoice.taxBreakdowns?.[0]).toEqual(
+      expect.objectContaining({
+        categoryCode: 'S',
+        taxRate: 5,
+        taxableAmount: 200,
+        taxAmount: 10,
+      }),
+    );
+  });
+
+});

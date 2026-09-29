@@ -1,0 +1,534 @@
+﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service.js';
+
+@Injectable()
+export class UaePintAeUblService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private esc(value: unknown): string {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  private date(value: unknown): string {
+    if (!value) return '';
+    return new Date(value as any).toISOString().slice(0, 10);
+  }
+
+  private money(value: unknown): string {
+    const n = Number(value ?? 0);
+    return Number.isFinite(n) ? n.toFixed(2) : '0.00';
+  }
+
+  private num(value: unknown, fallback = '0'): string {
+    if (value === null || value === undefined || value === '') return fallback;
+    return String(value);
+  }
+
+  private partyXml(tag: string, party: any): string {
+    if (!party) return '';
+
+    const endpoint = party.electronicAddress
+      ? `<cbc:EndpointID schemeID="0235">${this.esc(party.electronicAddress)}</cbc:EndpointID>`
+      : '';
+
+    const legalRegistrationAttributes = [
+      party.legalRegistrationIdentifierType
+        ? `schemeAgencyID="${this.esc(party.legalRegistrationIdentifierType)}"`
+        : '',
+      party.legalRegistrationAuthorityName
+        ? `schemeAgencyName="${this.esc(party.legalRegistrationAuthorityName)}"`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const legalId = party.legalRegistrationIdentifier
+      ? `<cac:PartyLegalEntity>
+          <cbc:RegistrationName>${this.esc(party.name ?? '')}</cbc:RegistrationName>
+          <cbc:CompanyID${legalRegistrationAttributes ? ` ${legalRegistrationAttributes}` : ''}>${this.esc(party.legalRegistrationIdentifier)}</cbc:CompanyID>
+        </cac:PartyLegalEntity>`
+      : `<cac:PartyLegalEntity>
+          <cbc:RegistrationName>${this.esc(party.name ?? '')}</cbc:RegistrationName>
+        </cac:PartyLegalEntity>`;
+
+    const tax = party.taxIdentifier
+      ? `<cac:PartyTaxScheme>
+          <cbc:CompanyID>${this.esc(party.taxIdentifier)}</cbc:CompanyID>
+          <cac:TaxScheme>
+            <cbc:ID>${this.esc(party.taxSchemeCode ?? 'VAT')}</cbc:ID>
+          </cac:TaxScheme>
+        </cac:PartyTaxScheme>`
+      : '';
+
+    return `
+      <${tag}>
+        <cac:Party>
+          ${endpoint}
+          <cac:PartyName>
+            <cbc:Name>${this.esc(party.name ?? '')}</cbc:Name>
+          </cac:PartyName>
+          <cac:PostalAddress>
+            <cbc:StreetName>${this.esc(party.addressLine1 ?? '')}</cbc:StreetName>
+            <cbc:CityName>${this.esc(party.city ?? '')}</cbc:CityName>
+            <cbc:CountrySubentity>${this.esc(party.countrySubdivision ?? '')}</cbc:CountrySubentity>
+            <cac:Country>
+              <cbc:IdentificationCode>${this.esc(party.countryCode ?? '')}</cbc:IdentificationCode>
+            </cac:Country>
+          </cac:PostalAddress>
+          ${tax}
+          ${legalId}
+        </cac:Party>
+      </${tag}>`;
+  }
+
+  async generate(invoiceId: string, tenantId: string): Promise<string> {
+    const invoice: any = await this.prisma.invoice.findFirst({
+      where: { id: invoiceId, tenantId },
+      include: {
+        lines: true,
+        parties: true,
+        taxBreakdowns: true,
+        allowanceCharges: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    if (String(invoice.invoiceTypeCode) === '381') {
+      return this.generateCreditNote(invoice);
+    }
+
+
+    const seller =
+      invoice.parties.find((p: any) =>
+        ['SELLER', 'SUPPLIER'].includes(String(p.role).toUpperCase()),
+      ) ?? invoice.parties[0];
+
+    const buyer =
+      invoice.parties.find((p: any) =>
+        ['BUYER', 'CUSTOMER'].includes(String(p.role).toUpperCase()),
+      ) ?? invoice.parties[1];
+
+    const currency = invoice.currency ?? 'AED';
+
+    const allowanceChargeXml = invoice.allowanceCharges
+      .map((ac: any) => {
+        const charge = String(ac.type).toUpperCase() === 'CHARGE';
+
+        return `
+        <cac:AllowanceCharge>
+          <cbc:ChargeIndicator>${charge}</cbc:ChargeIndicator>
+          ${
+            ac.reasonCode
+              ? `<cbc:AllowanceChargeReasonCode>${this.esc(ac.reasonCode)}</cbc:AllowanceChargeReasonCode>`
+              : ''
+          }
+          ${
+            ac.reasonText
+              ? `<cbc:AllowanceChargeReason>${this.esc(ac.reasonText)}</cbc:AllowanceChargeReason>`
+              : ''
+          }
+          ${
+            ac.percentage != null
+              ? `<cbc:MultiplierFactorNumeric>${this.num(ac.percentage)}</cbc:MultiplierFactorNumeric>`
+              : ''
+          }
+          <cbc:Amount currencyID="${this.esc(currency)}">${this.money(ac.amount)}</cbc:Amount>
+          ${
+            ac.baseAmount != null
+              ? `<cbc:BaseAmount currencyID="${this.esc(currency)}">${this.money(ac.baseAmount)}</cbc:BaseAmount>`
+              : ''
+          }
+          <cac:TaxCategory>
+            <cbc:ID>${this.esc(ac.taxCategoryCode ?? 'S')}</cbc:ID>
+            ${
+              ac.taxRate != null
+                ? `<cbc:Percent>${this.num(ac.taxRate)}</cbc:Percent>`
+                : ''
+            }
+            <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:AllowanceCharge>`;
+      })
+      .join('');
+
+    const subtotals = invoice.taxBreakdowns
+      .map(
+        (tb: any) => `
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="${this.esc(currency)}">${this.money(tb.taxableAmount)}</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="${this.esc(currency)}">${this.money(tb.taxAmount)}</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:ID>${this.esc(tb.categoryCode ?? 'S')}</cbc:ID>
+            ${
+              tb.taxRate != null
+                ? `<cbc:Percent>${this.num(tb.taxRate)}</cbc:Percent>`
+                : ''
+            }
+            ${
+              tb.vatExemptionReasonCode
+                ? `<cbc:TaxExemptionReasonCode>${this.esc(tb.vatExemptionReasonCode)}</cbc:TaxExemptionReasonCode>`
+                : ''
+            }
+            ${
+              tb.vatExemptionReasonText
+                ? `<cbc:TaxExemptionReason>${this.esc(tb.vatExemptionReasonText)}</cbc:TaxExemptionReason>`
+                : ''
+            }
+            <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>`,
+      )
+      .join('');
+
+    const lines = invoice.lines
+      .map(
+        (line: any, index: number) => `
+      <cac:InvoiceLine>
+        <cbc:ID>${this.esc(line.lineIdentifier ?? index + 1)}</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="${this.esc(line.unitOfMeasureCode ?? 'C62')}">${this.num(line.quantity, '1')}</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="${this.esc(currency)}">${this.money(line.lineNetAmount ?? line.unitPrice)}</cbc:LineExtensionAmount>
+
+        <cac:Item>
+          <cbc:Description>${this.esc(line.description)}</cbc:Description>
+          <cbc:Name>${this.esc(line.itemName ?? line.description)}</cbc:Name>
+          <cac:ClassifiedTaxCategory>
+            <cbc:ID>${this.esc(line.taxCategoryCode ?? 'S')}</cbc:ID>
+            ${
+              line.taxRate != null
+                ? `<cbc:Percent>${this.num(line.taxRate)}</cbc:Percent>`
+                : ''
+            }
+            <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+          </cac:ClassifiedTaxCategory>
+        </cac:Item>
+
+        <cac:Price>
+          <cbc:PriceAmount currencyID="${this.esc(currency)}">${this.money(line.itemNetPrice ?? line.unitPrice)}</cbc:PriceAmount>
+          <cbc:BaseQuantity unitCode="${this.esc(line.unitOfMeasureCode ?? 'C62')}">${this.num(line.priceBaseQuantity, '1')}</cbc:BaseQuantity>
+          <cac:AllowanceCharge>
+            <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+            <cbc:Amount currencyID="${this.esc(currency)}">0.00</cbc:Amount>
+            <cbc:BaseAmount currencyID="${this.esc(currency)}">${this.money(line.itemGrossPrice ?? line.itemNetPrice ?? line.unitPrice)}</cbc:BaseAmount>
+          </cac:AllowanceCharge>
+        </cac:Price>
+
+        <cac:ItemPriceExtension>
+          <cbc:Amount currencyID="AED">${this.money(line.lineAmountAED ?? line.lineTotal)}</cbc:Amount>
+          <cac:TaxTotal>
+            <cbc:TaxAmount currencyID="AED">${this.money(line.vatLineAmountAED ?? line.taxAmount)}</cbc:TaxAmount>
+          </cac:TaxTotal>
+        </cac:ItemPriceExtension>
+      </cac:InvoiceLine>`,
+      )
+      .join('');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice
+  xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+  xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+  xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+  <cbc:CustomizationID>${this.esc(invoice.specificationIdentifier)}</cbc:CustomizationID>
+  <cbc:ProfileID>${this.esc(invoice.businessProcessType)}</cbc:ProfileID>
+  <cbc:ProfileExecutionID>${this.esc(invoice.transactionTypeCode)}</cbc:ProfileExecutionID>
+  <cbc:ID>${this.esc(invoice.invoiceNumber)}</cbc:ID>
+  <cbc:UUID>${this.esc(invoice.id)}</cbc:UUID>
+  <cbc:IssueDate>${this.date(invoice.invoiceDate)}</cbc:IssueDate>
+  ${
+    invoice.paymentDueDate
+      ? `<cbc:DueDate>${this.date(invoice.paymentDueDate)}</cbc:DueDate>`
+      : ''
+  }
+  <cbc:InvoiceTypeCode>${this.esc(invoice.invoiceTypeCode)}</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${this.esc(currency)}</cbc:DocumentCurrencyCode>
+  ${String(currency).toUpperCase() !== 'AED'
+    ? `<cbc:TaxCurrencyCode>AED</cbc:TaxCurrencyCode>`
+    : ''}
+
+  ${this.partyXml('cac:AccountingSupplierParty', seller)}
+  ${this.partyXml('cac:AccountingCustomerParty', buyer)}
+
+  ${
+    invoice.paymentMeansTypeCode
+      ? `<cac:PaymentMeans>
+          <cbc:PaymentMeansCode>${this.esc(invoice.paymentMeansTypeCode)}</cbc:PaymentMeansCode>
+          ${invoice.paymentAccountIdentifier
+            ? `<cac:PayeeFinancialAccount>
+                 <cbc:ID>${this.esc(invoice.paymentAccountIdentifier)}</cbc:ID>
+               </cac:PayeeFinancialAccount>`
+            : ''}
+        </cac:PaymentMeans>`
+      : ''
+  }
+
+  ${allowanceChargeXml}
+
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalTaxAmount)}</cbc:TaxAmount>
+    ${subtotals}
+  </cac:TaxTotal>
+
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${this.esc(currency)}">${this.money(invoice.lineNetTotal)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalWithoutTax)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalWithTax)}</cbc:TaxInclusiveAmount>
+    <cbc:AllowanceTotalAmount currencyID="${this.esc(currency)}">${this.money(invoice.allowanceTotal)}</cbc:AllowanceTotalAmount>
+    <cbc:ChargeTotalAmount currencyID="${this.esc(currency)}">${this.money(invoice.chargeTotal)}</cbc:ChargeTotalAmount>
+    <cbc:PayableAmount currencyID="${this.esc(currency)}">${this.money(invoice.amountDue)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+
+  ${lines}
+
+</Invoice>`;
+  }
+
+  private generateCreditNote(invoice: any): string {
+    const currency = invoice.currency ?? 'AED';
+
+    const seller =
+      invoice.parties.find((p: any) =>
+        ['SELLER', 'SUPPLIER'].includes(String(p.role).toUpperCase()),
+      ) ?? invoice.parties[0];
+
+    const buyer =
+      invoice.parties.find((p: any) =>
+        ['BUYER', 'CUSTOMER'].includes(String(p.role).toUpperCase()),
+      ) ?? invoice.parties[1];
+
+    const billingReferenceXml =
+      invoice.precedingInvoiceReference
+        ? `
+  <cac:BillingReference>
+    <cac:InvoiceDocumentReference>
+      <cbc:ID>${this.esc(invoice.precedingInvoiceReference)}</cbc:ID>
+    </cac:InvoiceDocumentReference>
+  </cac:BillingReference>`
+        : '';
+
+    const discrepancyResponseXml =
+      invoice.creditNoteReasonCode || invoice.creditNoteReasonText
+        ? `
+  <cac:DiscrepancyResponse>
+    ${
+      invoice.creditNoteReasonCode
+        ? `<cbc:ResponseCode>${this.esc(invoice.creditNoteReasonCode)}</cbc:ResponseCode>`
+        : ''
+    }
+    ${
+      invoice.creditNoteReasonText
+        ? `<cbc:Description>${this.esc(invoice.creditNoteReasonText)}</cbc:Description>`
+        : ''
+    }
+  </cac:DiscrepancyResponse>`
+        : '';
+
+    const allowanceChargeXml = invoice.allowanceCharges
+      .map((ac: any) => {
+        const charge =
+          String(ac.type).toUpperCase() === 'CHARGE';
+
+        return `
+  <cac:AllowanceCharge>
+    <cbc:ChargeIndicator>${charge}</cbc:ChargeIndicator>
+    ${
+      ac.reasonCode
+        ? `<cbc:AllowanceChargeReasonCode>${this.esc(ac.reasonCode)}</cbc:AllowanceChargeReasonCode>`
+        : ''
+    }
+    ${
+      ac.reasonText
+        ? `<cbc:AllowanceChargeReason>${this.esc(ac.reasonText)}</cbc:AllowanceChargeReason>`
+        : ''
+    }
+    ${
+      ac.percentage != null
+        ? `<cbc:MultiplierFactorNumeric>${this.num(ac.percentage)}</cbc:MultiplierFactorNumeric>`
+        : ''
+    }
+    <cbc:Amount currencyID="${this.esc(currency)}">${this.money(ac.amount)}</cbc:Amount>
+    ${
+      ac.baseAmount != null
+        ? `<cbc:BaseAmount currencyID="${this.esc(currency)}">${this.money(ac.baseAmount)}</cbc:BaseAmount>`
+        : ''
+    }
+    ${
+      ac.taxCategoryCode
+        ? `<cac:TaxCategory>
+             <cbc:ID>${this.esc(ac.taxCategoryCode)}</cbc:ID>
+             ${
+               ac.taxRate != null
+                 ? `<cbc:Percent>${this.num(ac.taxRate)}</cbc:Percent>`
+                 : ''
+             }
+             <cac:TaxScheme>
+               <cbc:ID>VAT</cbc:ID>
+             </cac:TaxScheme>
+           </cac:TaxCategory>`
+        : ''
+    }
+  </cac:AllowanceCharge>`;
+      })
+      .join('');
+
+    const subtotals = invoice.taxBreakdowns
+      .map(
+        (tax: any) => `
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="${this.esc(currency)}">${this.money(tax.taxableAmount)}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${this.esc(currency)}">${this.money(tax.taxAmount)}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>${this.esc(tax.categoryCode ?? 'S')}</cbc:ID>
+        ${
+          tax.taxRate != null
+            ? `<cbc:Percent>${this.num(tax.taxRate)}</cbc:Percent>`
+            : ''
+        }
+        ${
+          tax.vatExemptionReasonCode
+            ? `<cbc:TaxExemptionReasonCode>${this.esc(tax.vatExemptionReasonCode)}</cbc:TaxExemptionReasonCode>`
+            : ''
+        }
+        ${
+          tax.vatExemptionReasonText
+            ? `<cbc:TaxExemptionReason>${this.esc(tax.vatExemptionReasonText)}</cbc:TaxExemptionReason>`
+            : ''
+        }
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>`,
+      )
+      .join('');
+
+    const lines = invoice.lines
+      .map(
+        (line: any) => `
+  <cac:CreditNoteLine>
+    <cbc:ID>${this.esc(line.lineIdentifier ?? line.id)}</cbc:ID>
+
+    <cbc:CreditedQuantity unitCode="${this.esc(
+      line.unitOfMeasureCode ?? 'C62',
+    )}">${this.num(line.quantity)}</cbc:CreditedQuantity>
+
+    <cbc:LineExtensionAmount currencyID="${this.esc(
+      currency,
+    )}">${this.money(
+      line.lineNetAmount ?? line.unitPrice,
+    )}</cbc:LineExtensionAmount>
+
+    <cac:Item>
+      <cbc:Description>${this.esc(line.description)}</cbc:Description>
+      <cbc:Name>${this.esc(
+        line.itemName ?? line.description,
+      )}</cbc:Name>
+
+      <cac:ClassifiedTaxCategory>
+        <cbc:ID>${this.esc(
+          line.taxCategoryCode ?? 'S',
+        )}</cbc:ID>
+        ${
+          line.taxRate != null
+            ? `<cbc:Percent>${this.num(line.taxRate)}</cbc:Percent>`
+            : ''
+        }
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:ClassifiedTaxCategory>
+    </cac:Item>
+
+    <cac:Price>
+      <cbc:PriceAmount currencyID="${this.esc(
+        currency,
+      )}">${this.money(
+        line.itemNetPrice ?? line.unitPrice,
+      )}</cbc:PriceAmount>
+
+      <cbc:BaseQuantity unitCode="${this.esc(
+        line.unitOfMeasureCode ?? 'C62',
+      )}">${this.num(
+        line.priceBaseQuantity,
+        '1',
+      )}</cbc:BaseQuantity>
+          <cac:AllowanceCharge>
+        <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+        <cbc:Amount currencyID="${this.esc(currency)}">${this.money(0)}</cbc:Amount>
+        <cbc:BaseAmount currencyID="${this.esc(currency)}">${this.money(line.itemGrossPrice ?? line.itemNetPrice ?? line.unitPrice)}</cbc:BaseAmount>
+      </cac:AllowanceCharge>
+
+</cac:Price>
+
+    <cac:ItemPriceExtension>
+      <cbc:Amount currencyID="AED">${this.money(
+        line.lineAmountAED ?? line.lineTotal,
+      )}</cbc:Amount>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="AED">${this.money(
+          line.vatLineAmountAED ?? line.taxAmount,
+        )}</cbc:TaxAmount>
+      </cac:TaxTotal>
+    </cac:ItemPriceExtension>
+  </cac:CreditNoteLine>`,
+      )
+      .join('');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<CreditNote
+  xmlns="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+  xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+  xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+
+  <cbc:CustomizationID>${this.esc(invoice.specificationIdentifier)}</cbc:CustomizationID>
+  <cbc:ProfileID>${this.esc(invoice.businessProcessType)}</cbc:ProfileID>
+  <cbc:ProfileExecutionID>${this.esc(invoice.transactionTypeCode)}</cbc:ProfileExecutionID>
+
+  <cbc:ID>${this.esc(invoice.invoiceNumber)}</cbc:ID>
+  <cbc:UUID>${this.esc(invoice.id)}</cbc:UUID>
+  <cbc:IssueDate>${this.date(invoice.invoiceDate)}</cbc:IssueDate>
+
+  <cbc:CreditNoteTypeCode>${this.esc(invoice.invoiceTypeCode)}</cbc:CreditNoteTypeCode>
+
+  <cbc:DocumentCurrencyCode>${this.esc(currency)}</cbc:DocumentCurrencyCode>
+  ${
+    String(currency).toUpperCase() !== 'AED'
+      ? `<cbc:TaxCurrencyCode>AED</cbc:TaxCurrencyCode>`
+      : ''
+  }
+
+  ${discrepancyResponseXml}
+  ${billingReferenceXml}
+
+  ${this.partyXml('cac:AccountingSupplierParty', seller)}
+  ${this.partyXml('cac:AccountingCustomerParty', buyer)}
+
+  ${allowanceChargeXml}
+
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalTaxAmount)}</cbc:TaxAmount>
+    ${subtotals}
+  </cac:TaxTotal>
+
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${this.esc(currency)}">${this.money(invoice.lineNetTotal)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalWithoutTax)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${this.esc(currency)}">${this.money(invoice.totalWithTax)}</cbc:TaxInclusiveAmount>
+    <cbc:AllowanceTotalAmount currencyID="${this.esc(currency)}">${this.money(invoice.allowanceTotal)}</cbc:AllowanceTotalAmount>
+    <cbc:ChargeTotalAmount currencyID="${this.esc(currency)}">${this.money(invoice.chargeTotal)}</cbc:ChargeTotalAmount>
+    <cbc:PayableAmount currencyID="${this.esc(currency)}">${this.money(invoice.amountDue)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+
+  ${lines}
+
+</CreditNote>`;
+  }
+}

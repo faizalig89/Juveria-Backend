@@ -1,0 +1,130 @@
+import { Injectable } from '@nestjs/common';
+import {
+  InvoiceRuleContext,
+  RuleResult,
+} from './rule.types.js';
+
+@Injectable()
+export class UaePintAeSemanticValidator {
+  evaluate(invoice: InvoiceRuleContext): RuleResult[] {
+    const results: RuleResult[] = [];
+
+    // UAE-SEM-001
+    // PINT requires invoice currency codes to use ISO 4217 alpha-3.
+    const currency =
+      invoice.currency?.trim().toUpperCase() ?? '';
+
+    const currencyFormatValid =
+      /^[A-Z]{3}$/.test(currency);
+
+    results.push({
+      ruleCode: 'UAE-SEM-001',
+      ruleName: 'Invoice currency code format',
+      status: currencyFormatValid ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: currencyFormatValid
+        ? 'Invoice currency uses ISO 4217 alpha-3 format'
+        : 'Invoice currency must use a three-letter ISO 4217 alpha-3 code',
+      field: 'currency',
+      actualValue: invoice.currency ?? '',
+    });
+
+    // UAE-SEM-002
+    // UAE transaction type is represented by exactly eight binary flags.
+    const transactionType =
+      invoice.transactionTypeCode?.trim() ?? '';
+
+    const transactionTypeValid =
+      /^[01]{8}$/.test(transactionType);
+
+    results.push({
+      ruleCode: 'UAE-SEM-002',
+      ruleName: 'UAE invoice transaction type format',
+      status: transactionTypeValid ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: transactionTypeValid
+        ? 'Transaction type contains exactly eight UAE binary flags'
+        : 'Transaction type must contain exactly eight positions using only 0 or 1',
+      field: 'transactionTypeCode',
+      actualValue: transactionType,
+    });
+
+    // UAE-SEM-003
+    // Payment means is represented using the UNCL4461 numeric code list.
+    // Full membership validation will be implemented in the code-list layer.
+    const paymentMeans =
+      invoice.paymentMeansTypeCode?.trim() ?? '';
+
+    const paymentMeansFormatValid =
+      /^\d{1,3}$/.test(paymentMeans);
+
+    const paymentMeansMissing =
+      paymentMeans.length === 0;
+
+    results.push({
+      ruleCode: 'UAE-SEM-003',
+      ruleName: 'Payment means type code format',
+      status: paymentMeansMissing
+        ? 'SKIPPED'
+        : paymentMeansFormatValid
+          ? 'PASS'
+          : 'FAIL',
+      severity: 'ERROR',
+      message: paymentMeansMissing
+        ? 'Payment means format validation skipped because the value is missing'
+        : paymentMeansFormatValid
+          ? 'Payment means uses numeric code format'
+          : 'Payment means must use a numeric UNCL4461 code',
+      field: 'paymentMeansTypeCode',
+      actualValue: paymentMeans,
+    });
+
+
+    // UAE-SEM-004
+    // IBT-24 identifies the specification and rules applied.
+    // Current scenario is normal supplier-issued UAE billing.
+    const specificationIdentifier =
+      invoice.specificationIdentifier?.trim() ?? '';
+
+    const specificationIdentifierValid =
+      specificationIdentifier.startsWith(
+        'urn:peppol:pint:billing-1@ae-1',
+      );
+
+    results.push({
+      ruleCode: 'UAE-SEM-004',
+      ruleName: 'PINT-AE specification identifier',
+      status: specificationIdentifierValid ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: specificationIdentifierValid
+        ? 'Specification identifier uses the UAE PINT billing identifier'
+        : 'Specification identifier must begin with the UAE PINT billing identifier for this billing scenario',
+      field: 'specificationIdentifier',
+      actualValue: specificationIdentifier,
+    });
+
+    // UAE-SEM-005
+    // IBT-23 identifies the Peppol business process.
+    // Current scenario is normal supplier-issued billing.
+    const businessProcessType =
+      invoice.businessProcessType?.trim() ?? '';
+
+    const businessProcessTypeValid =
+      businessProcessType.startsWith(
+        'urn:peppol:bis:billing',
+      );
+
+    results.push({
+      ruleCode: 'UAE-SEM-005',
+      ruleName: 'Peppol business process identifier',
+      status: businessProcessTypeValid ? 'PASS' : 'FAIL',
+      severity: 'ERROR',
+      message: businessProcessTypeValid
+        ? 'Business process identifier uses the Peppol billing profile'
+        : 'Business process identifier must begin with the Peppol billing profile for this billing scenario',
+      field: 'businessProcessType',
+      actualValue: businessProcessType,
+    });
+    return results;
+  }
+}

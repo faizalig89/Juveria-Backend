@@ -1,0 +1,235 @@
+import { Injectable } from '@nestjs/common';
+import {
+  InvoiceRuleContext,
+  RuleResult,
+} from './rule.types.js';
+import {
+  PINT_AE_INVOICE_TYPE_CODES,
+  PINT_AE_CURRENCY_CODES,
+  PINT_AE_PAYMENT_MEANS_CODES,
+  PINT_AE_COUNTRY_CODES,
+  PINT_AE_VAT_CATEGORY_CODES,
+  PINT_AE_UNIT_CODES,
+} from './uae/pint-ae-code-lists.js';
+
+@Injectable()
+export class UaePintAeCodeListValidator {
+  evaluate(invoice: InvoiceRuleContext): RuleResult[] {
+    const results: RuleResult[] = [];
+
+    /*
+     * UAE PINT-AE code-list validation layer.
+     *
+     * Keep this separate from mandatory-field validation:
+     * - Mandatory rules answer: is the field present?
+     * - Semantic rules answer: is the structure/format valid?
+     * - Code-list rules answer: is the value from the permitted code set?
+     */
+
+    // Initial production-safe subset used by the current UAE Tax Invoice
+    // test scenario. These sets will be expanded from the authoritative
+    // PINT-AE code-list sources rather than accepting arbitrary values.
+    const supportedInvoiceTypes =
+      PINT_AE_INVOICE_TYPE_CODES;
+
+    const supportedCurrencies =
+      PINT_AE_CURRENCY_CODES;
+
+    const supportedPaymentMeans =
+      PINT_AE_PAYMENT_MEANS_CODES;
+
+    const supportedCountries =
+      PINT_AE_COUNTRY_CODES;
+
+    const supportedVatCategories =
+      PINT_AE_VAT_CATEGORY_CODES;
+
+    const supportedUnits =
+      PINT_AE_UNIT_CODES;
+
+    const codeRule = (
+      ruleCode: string,
+      ruleName: string,
+      field: string,
+      value: unknown,
+      allowedValues: Set<string>,
+    ): RuleResult => {
+      const actualValue =
+        value === null || value === undefined
+          ? ''
+          : String(value).trim().toUpperCase();
+
+      /*
+       * Missing values are handled by the existing mandatory-field layer.
+       * Avoid creating a duplicate code-list failure for the same absence.
+       */
+      if (actualValue.length === 0) {
+        return {
+          ruleCode,
+          ruleName,
+          status: 'SKIPPED',
+          severity: 'ERROR',
+          message:
+            'Code-list validation skipped because the value is missing',
+          field,
+          actualValue,
+        };
+      }
+
+      const valid = allowedValues.has(actualValue);
+
+      return {
+        ruleCode,
+        ruleName,
+        status: valid ? 'PASS' : 'FAIL',
+        severity: 'ERROR',
+        message: valid
+          ? `${ruleName} is permitted by the current UAE PINT-AE validation profile`
+          : `${ruleName} is not permitted by the current UAE PINT-AE validation profile`,
+        field,
+        actualValue,
+      };
+    };
+
+    results.push(
+      codeRule(
+        'UAE-CODE-001',
+        'Invoice type code',
+        'invoiceTypeCode',
+        invoice.invoiceTypeCode,
+        supportedInvoiceTypes,
+      ),
+    );
+
+    results.push(
+      codeRule(
+        'UAE-CODE-002',
+        'Invoice currency code',
+        'currency',
+        invoice.currency,
+        supportedCurrencies,
+      ),
+    );
+
+    results.push(
+      codeRule(
+        'UAE-CODE-003',
+        'Payment means type code',
+        'paymentMeansTypeCode',
+        invoice.paymentMeansTypeCode,
+        supportedPaymentMeans,
+      ),
+    );
+
+    const seller =
+      invoice.parties?.find(
+        (party) => party.role?.toUpperCase() === 'SELLER',
+      );
+
+    results.push(
+      codeRule(
+        'UAE-CODE-004',
+        'Seller country code',
+        'seller.countryCode',
+        seller?.countryCode,
+        supportedCountries,
+      ),
+    );
+
+    const buyer =
+      invoice.parties?.find(
+        (party) => party.role?.toUpperCase() === 'BUYER',
+      );
+
+    results.push(
+      codeRule(
+        'UAE-CODE-005',
+        'Buyer country code',
+        'buyer.countryCode',
+        buyer?.countryCode,
+        supportedCountries,
+      ),
+    );
+
+    /*
+     * Validate every tax breakdown independently.
+     * Unlike the mandatory-field implementation, this does not assume
+     * that only the first tax breakdown matters.
+     */
+    if (invoice.taxBreakdowns && invoice.taxBreakdowns.length > 0) {
+      invoice.taxBreakdowns.forEach((taxBreakdown, index) => {
+        results.push(
+          codeRule(
+            'UAE-CODE-006',
+            `VAT category code - Tax Breakdown ${index + 1}`,
+            `taxBreakdowns[${index}].categoryCode`,
+            taxBreakdown.categoryCode,
+            supportedVatCategories,
+          ),
+        );
+      });
+    } else {
+      results.push({
+        ruleCode: 'UAE-CODE-006',
+        ruleName: 'VAT category code',
+        status: 'SKIPPED',
+        severity: 'ERROR',
+        message:
+          'Code-list validation skipped because no tax breakdown is available',
+        field: 'taxBreakdowns',
+        actualValue: '',
+      });
+    }
+
+    /*
+     * Validate every invoice line independently.
+     */
+    if (invoice.lines && invoice.lines.length > 0) {
+      invoice.lines.forEach((line, index) => {
+        results.push(
+          codeRule(
+            'UAE-CODE-007',
+            `Unit of measure code - Line ${index + 1}`,
+            `lines[${index}].unitOfMeasureCode`,
+            line.unitOfMeasureCode,
+            supportedUnits,
+          ),
+        );
+
+        results.push(
+          codeRule(
+            'UAE-CODE-008',
+            `VAT category code - Line ${index + 1}`,
+            `lines[${index}].taxCategoryCode`,
+            line.taxCategoryCode,
+            supportedVatCategories,
+          ),
+        );
+      });
+    } else {
+      results.push({
+        ruleCode: 'UAE-CODE-007',
+        ruleName: 'Unit of measure code',
+        status: 'SKIPPED',
+        severity: 'ERROR',
+        message:
+          'Code-list validation skipped because no invoice lines are available',
+        field: 'lines',
+        actualValue: '',
+      });
+
+      results.push({
+        ruleCode: 'UAE-CODE-008',
+        ruleName: 'Invoice line VAT category code',
+        status: 'SKIPPED',
+        severity: 'ERROR',
+        message:
+          'Code-list validation skipped because no invoice lines are available',
+        field: 'lines',
+        actualValue: '',
+      });
+    }
+
+    return results;
+  }
+}

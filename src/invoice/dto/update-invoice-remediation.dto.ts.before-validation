@@ -1,0 +1,29 @@
+﻿export class UpdateInvoiceRemediationDto {
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  currency?: string;
+  totalAmount?: number;
+
+  jurisdiction?: string;
+  invoiceTypeCode?: string;
+  transactionTypeCode?: string;
+  paymentDueDate?: string;
+  businessProcessType?: string;
+  specificationIdentifier?: string;
+  paymentMeansTypeCode?: string;
+  paymentAccountIdentifier?: string;
+
+  creditNoteReasonCode?: string;
+  creditNoteReasonText?: string;
+  precedingInvoiceReference?: string;
+
+  lineNetTotal?: number;
+  allowanceTotal?: number;
+  chargeTotal?: number;
+  totalWithoutTax?: number;
+  totalTaxAmount?: number;
+  totalWithTax?: number;
+  paidAmount?: number;
+  roundingAmount?: number;
+  amountDue?: number;
+}

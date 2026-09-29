@@ -1,0 +1,234 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Tenant {
+  id        String    @id @default(uuid())
+  name      String
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  invoices  Invoice[]
+  users     User[]
+}
+
+model User {
+  id           String    @id @default(uuid())
+  tenantId     String
+  email        String    @unique
+  firstName    String
+  lastName     String?
+  role         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  passwordHash String
+  invoices     Invoice[]
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+}
+
+model Invoice {
+  id               String   @id @default(uuid())
+  tenantId         String
+  uploadedById     String
+  invoiceNumber    String
+  invoiceDate      DateTime
+  currency         String
+  totalAmount      Decimal
+  status           String
+  complianceStatus String   @default("PENDING")
+
+  // UAE / PINT-AE invoice-level structured data
+  jurisdiction            String?
+  invoiceTypeCode         String?
+  transactionTypeCode     String?
+  paymentDueDate          DateTime?
+  businessProcessType     String?
+  specificationIdentifier String?
+  paymentMeansTypeCode    String?
+  paymentAccountIdentifier String?
+
+  // UAE / PINT-AE Credit Note data
+  creditNoteReasonCode       String?
+  creditNoteReasonText       String?
+  precedingInvoiceReference  String?
+
+  // Structured monetary totals
+  lineNetTotal    Decimal?
+  allowanceTotal  Decimal?
+  chargeTotal     Decimal?
+  totalWithoutTax Decimal?
+  totalTaxAmount  Decimal?
+  totalWithTax    Decimal?
+  paidAmount      Decimal?
+  roundingAmount  Decimal?
+  amountDue       Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  uploadedBy        User                      @relation(fields: [uploadedById], references: [id])
+  documents         InvoiceDocument[]
+  lines             InvoiceLine[]
+  parties           InvoiceParty[]
+  taxBreakdowns     InvoiceTaxBreakdown[]
+  allowanceCharges  InvoiceAllowanceCharge[]
+  complianceResults InvoiceComplianceResult[]
+  auditEvents       InvoiceAuditEvent[]
+}
+
+model InvoiceLine {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  quantity    Decimal
+  unitPrice   Decimal
+  taxAmount   Decimal
+  lineTotal   Decimal
+
+  // UAE / PINT-AE structured line data
+  lineIdentifier         String?
+  unitOfMeasureCode      String?
+  lineNetAmount          Decimal?
+  itemNetPrice           Decimal?
+  itemGrossPrice         Decimal?
+  priceBaseQuantity      Decimal?
+  taxCategoryCode        String?
+  taxRate                Decimal?
+  vatExemptionReasonCode String?
+  vatExemptionReasonText String?
+  vatLineAmountAED       Decimal?
+  lineAmountAED          Decimal?
+  itemName               String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model InvoiceParty {
+  id        String @id @default(uuid())
+  invoiceId String
+  role      String
+
+  name                            String?
+  electronicAddress               String?
+  electronicIdentifier            String?
+  legalRegistrationIdentifier     String?
+  legalRegistrationIdentifierType String?
+  legalRegistrationAuthorityName String?
+  taxIdentifier                   String?
+  taxSchemeCode                   String?
+
+  addressLine1       String?
+  city               String?
+  countrySubdivision String?
+  countryCode        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([invoiceId, role])
+}
+
+model InvoiceAllowanceCharge {
+  id        String  @id @default(uuid())
+  invoiceId String
+  type      String
+  amount    Decimal
+
+  reasonCode      String?
+  reasonText      String?
+  baseAmount      Decimal?
+  percentage      Decimal?
+  taxCategoryCode String?
+  taxRate         Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([invoiceId, type])
+}
+
+model InvoiceTaxBreakdown {
+  id                     String   @id @default(uuid())
+  invoiceId              String
+  taxableAmount          Decimal?
+  taxAmount              Decimal?
+  categoryCode           String?
+  taxRate                Decimal?
+  vatExemptionReasonCode String?
+  vatExemptionReasonText String?
+  createdAt              DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model InvoiceDocument {
+  id           String   @id @default(uuid())
+  invoiceId    String
+  tenantId     String
+  uploadedById String
+  originalName String
+  storageKey   String
+  mimeType     String
+  fileSize     Int
+  status       String   @default("UPLOADED")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id])
+}
+
+model InvoiceComplianceResult {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  tenantId    String
+  rulePack    String   @default("GENERIC")
+  ruleCode    String
+  ruleName    String
+  status      String
+  severity    String
+  message     String?
+  field       String?
+  actualValue String?
+  createdAt   DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([invoiceId, rulePack])
+  @@index([invoiceId, rulePack, status])
+}
+
+model InvoiceAuditEvent {
+  id         String   @id @default(uuid())
+  invoiceId  String
+  tenantId   String
+  userId     String?
+  action     String
+  fromStatus String?
+  toStatus   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([tenantId])
+  @@index([createdAt])
+}

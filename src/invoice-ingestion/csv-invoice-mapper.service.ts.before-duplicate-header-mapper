@@ -1,0 +1,417 @@
+import {
+  BadRequestException,
+  Injectable,
+} from '@nestjs/common';
+
+import { parse } from 'csv-parse/sync';
+
+import type {
+  InvoiceIngestionResult,
+} from './invoice-ingestion.types.js';
+
+import {
+  JsonInvoiceMapperService,
+} from './json-invoice-mapper.service.js';
+
+type CsvRow = Record<string, string>;
+
+@Injectable()
+export class CsvInvoiceMapperService {
+  constructor(
+    private readonly jsonMapper:
+      JsonInvoiceMapperService =
+        new JsonInvoiceMapperService(),
+  ) {}
+
+  map(content: string): InvoiceIngestionResult {
+    let rows: CsvRow[];
+
+    try {
+      rows = parse(content, {
+        columns: true,
+        skip_empty_lines: true,
+        bom: true,
+        trim: true,
+      }) as CsvRow[];
+    } catch {
+      throw new BadRequestException(
+        'Uploaded file contains invalid CSV',
+      );
+    }
+
+    if (!rows.length) {
+      throw new BadRequestException(
+        'CSV invoice contains no records',
+      );
+    }
+
+    this.assertSingleInvoice(rows);
+
+    const first = rows[0];
+
+    const canonical: Record<string, unknown> = {
+      invoiceNumber: first.invoiceNumber,
+      invoiceDate: first.invoiceDate,
+      currency: first.currency,
+      totalAmount: first.totalAmount,
+
+      jurisdiction:
+        this.optional(first.jurisdiction),
+      invoiceTypeCode:
+        this.optional(first.invoiceTypeCode),
+      transactionTypeCode:
+        this.optional(first.transactionTypeCode),
+      paymentDueDate:
+        this.optional(first.paymentDueDate),
+      businessProcessType:
+        this.optional(first.businessProcessType),
+      specificationIdentifier:
+        this.optional(
+          first.specificationIdentifier,
+        ),
+      paymentMeansTypeCode:
+        this.optional(first.paymentMeansTypeCode),
+      paymentAccountIdentifier:
+        this.optional(
+          first.paymentAccountIdentifier,
+        ),
+
+      creditNoteReasonCode:
+        this.optional(first.creditNoteReasonCode),
+      creditNoteReasonText:
+        this.optional(first.creditNoteReasonText),
+      precedingInvoiceReference:
+        this.optional(
+          first.precedingInvoiceReference,
+        ),
+
+      lineNetTotal:
+        this.optional(first.lineNetTotal),
+      allowanceTotal:
+        this.optional(first.allowanceTotal),
+      chargeTotal:
+        this.optional(first.chargeTotal),
+      totalWithoutTax:
+        this.optional(first.totalWithoutTax),
+      totalTaxAmount:
+        this.optional(first.totalTaxAmount),
+      totalWithTax:
+        this.optional(first.totalWithTax),
+      paidAmount:
+        this.optional(first.paidAmount),
+      roundingAmount:
+        this.optional(first.roundingAmount),
+      amountDue:
+        this.optional(first.amountDue),
+    };
+
+    const seller = this.party(
+      first,
+      'seller',
+      'SELLER',
+    );
+
+    const buyer = this.party(
+      first,
+      'buyer',
+      'BUYER',
+    );
+
+    const parties = [
+      seller,
+      buyer,
+    ].filter(
+      (party): party is Record<string, unknown> =>
+        party !== undefined,
+    );
+
+    if (parties.length) {
+      canonical.parties = parties;
+    }
+
+    canonical.lines = rows.map(
+      (row, index) =>
+        this.line(row, index),
+    );
+
+    const taxBreakdown =
+      this.taxBreakdown(first);
+
+    if (taxBreakdown) {
+      canonical.taxBreakdowns = [
+        taxBreakdown,
+      ];
+    }
+
+    const mapped =
+      this.jsonMapper.map(canonical);
+
+    return {
+      ...mapped,
+      source: 'CSV',
+    };
+  }
+
+  private assertSingleInvoice(
+    rows: CsvRow[],
+  ): void {
+    const invoiceNumbers =
+      new Set(
+        rows
+          .map((row) =>
+            row.invoiceNumber?.trim(),
+          )
+          .filter(Boolean),
+      );
+
+    if (invoiceNumbers.size > 1) {
+      throw new BadRequestException(
+        'CSV upload must contain exactly one invoice',
+      );
+    }
+
+    const first = rows[0];
+
+    const repeatedFields = [
+      // Invoice identity
+      'invoiceNumber',
+      'invoiceDate',
+      'currency',
+      'totalAmount',
+
+      // UAE / document-level metadata
+      'jurisdiction',
+      'invoiceTypeCode',
+      'transactionTypeCode',
+      'paymentDueDate',
+      'businessProcessType',
+      'specificationIdentifier',
+      'paymentMeansTypeCode',
+      'paymentAccountIdentifier',
+
+      // Credit-note metadata
+      'creditNoteReasonCode',
+      'creditNoteReasonText',
+      'precedingInvoiceReference',
+
+      // Monetary totals
+      'lineNetTotal',
+      'allowanceTotal',
+      'chargeTotal',
+      'totalWithoutTax',
+      'totalTaxAmount',
+      'totalWithTax',
+      'paidAmount',
+      'roundingAmount',
+      'amountDue',
+
+      // Seller
+      'sellerName',
+      'sellerElectronicAddress',
+      'sellerElectronicIdentifier',
+      'sellerLegalRegistrationIdentifier',
+      'sellerLegalRegistrationIdentifierType',
+      'sellerLegalRegistrationAuthorityName',
+      'sellerTaxIdentifier',
+      'sellerTaxSchemeCode',
+      'sellerAddressLine1',
+      'sellerCity',
+      'sellerCountrySubdivision',
+      'sellerCountryCode',
+
+      // Buyer
+      'buyerName',
+      'buyerElectronicAddress',
+      'buyerElectronicIdentifier',
+      'buyerLegalRegistrationIdentifier',
+      'buyerLegalRegistrationIdentifierType',
+      'buyerLegalRegistrationAuthorityName',
+      'buyerTaxIdentifier',
+      'buyerTaxSchemeCode',
+      'buyerAddressLine1',
+      'buyerCity',
+      'buyerCountrySubdivision',
+      'buyerCountryCode',
+
+      // Current CSV v1 supports one repeated tax breakdown
+      'taxableAmount',
+      'taxBreakdownAmount',
+      'taxCategoryCode',
+      'taxRate',
+      'taxVatExemptionReasonCode',
+      'taxVatExemptionReasonText',
+    ];
+
+    rows.forEach((row, index) => {
+      for (const field of repeatedFields) {
+        const expected =
+          first[field]?.trim() ?? '';
+
+        const actual =
+          row[field]?.trim() ?? '';
+
+        if (actual !== expected) {
+          throw new BadRequestException(
+            `CSV row ${index + 2} has inconsistent ${field}`,
+          );
+        }
+      }
+    });
+  }
+
+  private party(
+    row: CsvRow,
+    prefix: 'seller' | 'buyer',
+    role: 'SELLER' | 'BUYER',
+  ): Record<string, unknown> | undefined {
+    const get = (suffix: string) =>
+      this.optional(
+        row[
+          `${prefix}${suffix}`
+        ],
+      );
+
+    const party: Record<string, unknown> = {
+      role,
+      name: get('Name'),
+      electronicAddress:
+        get('ElectronicAddress'),
+      electronicIdentifier:
+        get('ElectronicIdentifier'),
+      legalRegistrationIdentifier:
+        get('LegalRegistrationIdentifier'),
+      legalRegistrationIdentifierType:
+        get('LegalRegistrationIdentifierType'),
+      legalRegistrationAuthorityName:
+        get('LegalRegistrationAuthorityName'),
+      taxIdentifier:
+        get('TaxIdentifier'),
+      taxSchemeCode:
+        get('TaxSchemeCode'),
+      addressLine1:
+        get('AddressLine1'),
+      city:
+        get('City'),
+      countrySubdivision:
+        get('CountrySubdivision'),
+      countryCode:
+        get('CountryCode'),
+    };
+
+    const hasValue =
+      Object.entries(party).some(
+        ([key, value]) =>
+          key !== 'role' &&
+          value !== undefined,
+      );
+
+    return hasValue
+      ? party
+      : undefined;
+  }
+
+  private line(
+    row: CsvRow,
+    index: number,
+  ): Record<string, unknown> {
+    const required = (
+      field: string,
+    ): string => {
+      const value = row[field]?.trim();
+
+      if (!value) {
+        throw new BadRequestException(
+          `CSV row ${index + 2}: ${field} is required`,
+        );
+      }
+
+      return value;
+    };
+
+    return {
+      description:
+        required('lineDescription'),
+      quantity:
+        required('lineQuantity'),
+      unitPrice:
+        required('lineUnitPrice'),
+      taxAmount:
+        required('lineTaxAmount'),
+      lineTotal:
+        required('lineTotal'),
+
+      lineIdentifier:
+        this.optional(row.lineIdentifier),
+      unitOfMeasureCode:
+        this.optional(row.unitOfMeasureCode),
+      lineNetAmount:
+        this.optional(row.lineNetAmount),
+      itemNetPrice:
+        this.optional(row.itemNetPrice),
+      itemGrossPrice:
+        this.optional(row.itemGrossPrice),
+      priceBaseQuantity:
+        this.optional(row.priceBaseQuantity),
+      taxCategoryCode:
+        this.optional(row.lineTaxCategoryCode),
+      taxRate:
+        this.optional(row.lineTaxRate),
+      vatExemptionReasonCode:
+        this.optional(
+          row.lineVatExemptionReasonCode,
+        ),
+      vatExemptionReasonText:
+        this.optional(
+          row.lineVatExemptionReasonText,
+        ),
+      vatLineAmountAED:
+        this.optional(row.vatLineAmountAED),
+      lineAmountAED:
+        this.optional(row.lineAmountAED),
+      itemName:
+        this.optional(row.itemName),
+    };
+  }
+
+  private taxBreakdown(
+    row: CsvRow,
+  ): Record<string, unknown> | undefined {
+    const tax = {
+      taxableAmount:
+        this.optional(row.taxableAmount),
+      taxAmount:
+        this.optional(row.taxBreakdownAmount),
+      categoryCode:
+        this.optional(row.taxCategoryCode),
+      taxRate:
+        this.optional(row.taxRate),
+      vatExemptionReasonCode:
+        this.optional(
+          row.taxVatExemptionReasonCode,
+        ),
+      vatExemptionReasonText:
+        this.optional(
+          row.taxVatExemptionReasonText,
+        ),
+    };
+
+    return Object.values(tax).some(
+      (value) => value !== undefined,
+    )
+      ? tax
+      : undefined;
+  }
+
+  private optional(
+    value: string | undefined,
+  ): string | undefined {
+    if (
+      value === undefined ||
+      !value.trim()
+    ) {
+      return undefined;
+    }
+
+    return value.trim();
+  }
+}

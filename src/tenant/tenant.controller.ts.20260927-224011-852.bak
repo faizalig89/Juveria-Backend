@@ -1,0 +1,29 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { Roles } from '../auth/roles.decorator.js';
+import { RolesGuard } from '../auth/roles.guard.js';
+import { CreateTenantDto } from './dto/create-tenant.dto.js';
+import { TenantService } from './tenant.service.js';
+
+@Controller('tenant')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('PLATFORM_ADMIN')
+export class TenantController {
+  constructor(private readonly tenantService: TenantService) {}
+
+  @Get()
+  async findAll() {
+    return this.tenantService.findAll();
+  }
+
+  @Post()
+  async create(@Body() body: CreateTenantDto) {
+    return this.tenantService.create(body.name, body.slug);
+  }
+}

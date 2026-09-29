@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<svrl:schematron-output xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+                        xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+                        xmlns:cn="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+                        xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
+                        xmlns:iso="http://purl.oclc.org/dsdl/schematron"
+                        xmlns:qdt="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDataTypes-2"
+                        xmlns:saxon="http://saxon.sf.net/"
+                        xmlns:schold="http://www.ascc.net/xml/schematron"
+                        xmlns:svrl="http://purl.oclc.org/dsdl/svrl"
+                        xmlns:u="utils"
+                        xmlns:ubl="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+                        xmlns:udt="urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2"
+                        xmlns:xhtml="http://www.w3.org/1999/xhtml"
+                        xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                        xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                        title=""
+                        schemaVersion=""><!--   
+		   
+		   
+		 -->
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
+                                       prefix="ext"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+                                       prefix="cbc"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+                                       prefix="cac"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:QualifiedDataTypes-2"
+                                       prefix="qdt"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:UnqualifiedDataTypes-2"
+                                       prefix="udt"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+                                       prefix="cn"/>
+   <svrl:ns-prefix-in-attribute-values uri="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+                                       prefix="ubl"/>
+   <svrl:ns-prefix-in-attribute-values uri="utils" prefix="u"/>
+   <svrl:ns-prefix-in-attribute-values uri="http://www.w3.org/2001/XMLSchema" prefix="xs"/>
+   <svrl:active-pattern document="" id="UBL-modelaligned" name="UBL-modelaligned"/>
+   <svrl:fired-rule context="/ubl:Invoice | /cn:CreditNote"/>
+   <svrl:fired-rule context="cac:AccountingSupplierParty/cac:Party"/>
+   <svrl:failed-assert test="not(cac:PartyLegalEntity/cbc:CompanyID and cbc:EndpointID/@schemeID = &#34;0235&#34; and cac:PostalAddress/cac:Country/cbc:IdentificationCode = &#34;AE&#34; and not(cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID = (&#34;TL&#34;, &#34;EID&#34;, &#34;PAS&#34;, &#34;CD&#34;)))"
+                       id="ibr-173-ae"
+                       flag="fatal"
+                       location="/*:Invoice[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'][1]/*:AccountingSupplierParty[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]/*:Party[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]">
+      <svrl:text>[ibr-173-ae]-The value in Seller legal registration identifier type [BTAE-15] scheme identifier [IBT-030-1] should either be 'Commercial/Trade license' or 'Emirates ID' or 'Passport' or 'Cabinet decision' when the value in Seller legal registration identifier (IBT-030) is provided and scheme identifier (IBT-034-1) is '0235' and the Seller country code (IBT-055) is AE.</svrl:text>
+   </svrl:failed-assert>
+   <svrl:failed-assert test="not(cbc:EndpointID[@schemeID = &#34;0235&#34;]) or not(cac:PartyLegalEntity/cbc:CompanyID) or cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID"
+                       id="ibr-181-ae"
+                       flag="fatal"
+                       location="/*:Invoice[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'][1]/*:AccountingSupplierParty[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]/*:Party[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]">
+      <svrl:text>[ibr-181-ae]-When scheme identifier (IBT-034-1) is '0235' and Seller legal registration identifier (ibt-030) is provided, then Seller legal registration identifier type (BTAE-15) MUST be present</svrl:text>
+   </svrl:failed-assert>
+   <svrl:fired-rule context="cac:AccountingSupplierParty/cac:Party/cac:PostalAddress"/>
+   <svrl:fired-rule context="cac:Party[cac:PostalAddress/cac:Country/cbc:IdentificationCode = 'AE']/cac:PartyTaxScheme[cac:TaxScheme/normalize-space(upper-case(cbc:ID)) = 'VAT']/cbc:CompanyID"/>
+   <svrl:fired-rule context="cac:TaxScheme/cbc:ID"/>
+   <svrl:fired-rule context="cac:AccountingCustomerParty/cac:Party"/>
+   <svrl:failed-assert test="not(cbc:EndpointID[@schemeID = &#34;0235&#34;] and cac:PartyLegalEntity/cbc:CompanyID) or cac:PartyLegalEntity/cbc:CompanyID/@schemeAgencyID"
+                       id="ibr-180-ae"
+                       flag="fatal"
+                       location="/*:Invoice[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'][1]/*:AccountingCustomerParty[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]/*:Party[namespace-uri()='urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2'][1]">
+      <svrl:text>[ibr-180-ae]-When scheme identifier (IBT-049-1) is '0235' and Buyer legal registration identifier (ibt-047) is provided, then Buyer legal registration identifier type (BTAE-16) MUST be present</svrl:text>
+   </svrl:failed-assert>
+   <svrl:fired-rule context="cac:AccountingCustomerParty/cac:Party/cac:PostalAddress"/>
+   <svrl:fired-rule context="cac:Party[cac:PostalAddress/cac:Country/cbc:IdentificationCode = 'AE']/cac:PartyTaxScheme[cac:TaxScheme/normalize-space(upper-case(cbc:ID)) = 'VAT']/cbc:CompanyID"/>
+   <svrl:fired-rule context="cac:TaxScheme/cbc:ID"/>
+   <svrl:fired-rule context="cac:PaymentMeans"/>
+   <svrl:fired-rule context="cac:TaxSubtotal"/>
+   <svrl:fired-rule context="/*/cac:TaxTotal/cac:TaxSubtotal/cac:TaxCategory[normalize-space(cbc:ID) = 'S'][cac:TaxScheme/normalize-space(upper-case(cbc:ID))='VAT']"/>
+   <svrl:fired-rule context="cac:TaxScheme/cbc:ID"/>
+   <svrl:fired-rule context="cac:InvoiceLine | cac:CreditNoteLine"/>
+   <svrl:fired-rule context="cac:Item"/>
+   <svrl:fired-rule context="cac:InvoiceLine/cac:Item/cac:ClassifiedTaxCategory[normalize-space(cbc:ID) = 'S'][cac:TaxScheme/normalize-space(upper-case(cbc:ID))='VAT'] | cac:CreditNoteLine/cac:Item/cac:ClassifiedTaxCategory[normalize-space(cbc:ID) = 'S'][cac:TaxScheme/normalize-space(upper-case(cbc:ID))='VAT']"/>
+   <svrl:fired-rule context="cac:TaxScheme/cbc:ID"/>
+   <svrl:fired-rule context="cac:Price"/>
+   <svrl:fired-rule context="cac:Price/cac:AllowanceCharge"/>
+   <svrl:active-pattern document="" id="Codesmodelaligned" name="Codesmodelaligned"/>
+   <svrl:fired-rule context="cac:TaxCategory/cbc:ID | cac:ClassifiedTaxCategory/cbc:ID"/>
+   <svrl:fired-rule context="cac:TaxCategory/cbc:ID | cac:ClassifiedTaxCategory/cbc:ID"/>
+</svrl:schematron-output>

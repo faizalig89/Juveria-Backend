@@ -1,0 +1,120 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+
+@Injectable()
+export class InvoiceService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(
+    dto: CreateInvoiceDto,
+    tenantId: string,
+    uploadedById: string,
+  ) {
+    return this.prisma.invoice.create({
+      data: {
+        tenantId,
+        uploadedById,
+        invoiceNumber: dto.invoiceNumber,
+        invoiceDate: new Date(dto.invoiceDate),
+        currency: dto.currency,
+        totalAmount: dto.totalAmount,
+        status: 'RECEIVED',
+
+        jurisdiction: dto.jurisdiction,
+        invoiceTypeCode: dto.invoiceTypeCode,
+        transactionTypeCode: dto.transactionTypeCode,
+        paymentDueDate: dto.paymentDueDate
+          ? new Date(dto.paymentDueDate)
+          : undefined,
+        businessProcessType: dto.businessProcessType,
+        specificationIdentifier: dto.specificationIdentifier,
+        paymentMeansTypeCode: dto.paymentMeansTypeCode,
+
+        lineNetTotal: dto.lineNetTotal,
+        totalWithoutTax: dto.totalWithoutTax,
+        totalTaxAmount: dto.totalTaxAmount,
+        totalWithTax: dto.totalWithTax,
+        amountDue: dto.amountDue,
+
+        parties: dto.parties?.length
+          ? {
+              create: dto.parties,
+            }
+          : undefined,
+
+        taxBreakdowns: dto.taxBreakdowns?.length
+          ? {
+              create: dto.taxBreakdowns,
+            }
+          : undefined,
+
+        lines: dto.lines?.length
+          ? {
+              create: dto.lines,
+            }
+          : undefined,
+      },
+      include: {
+        parties: true,
+        taxBreakdowns: true,
+        lines: true,
+        documents: true,
+      },
+    });
+  }
+
+  async findAllByTenant(tenantId: string) {
+    return this.prisma.invoice.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getAuditHistory(id: string, tenantId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    return this.prisma.invoiceAuditEvent.findMany({
+      where: {
+        invoiceId: id,
+        tenantId,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+    });
+  }
+
+  async findOne(id: string, tenantId: string) {
+    const invoice = await this.prisma.invoice.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+      include: {
+        lines: true,
+        documents: true,
+        parties: true,
+        taxBreakdowns: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Invoice not found');
+    }
+
+    return invoice;
+  }
+}

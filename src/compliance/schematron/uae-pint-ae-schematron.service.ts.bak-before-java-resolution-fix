@@ -1,0 +1,273 @@
+﻿import {
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { execFile } from 'node:child_process';
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+import { XMLParser } from 'fast-xml-parser';
+
+const execFileAsync = promisify(execFile);
+
+export interface SchematronFailure {
+  source: 'SHARED' | 'UAE';
+  id: string;
+  flag: string;
+  message: string;
+  location?: string;
+  test?: string;
+}
+
+export interface SchematronValidationResult {
+  shared: {
+    passed: boolean;
+    failureCount: number;
+  };
+  uae: {
+    passed: boolean;
+    failureCount: number;
+  };
+  totalFailures: number;
+  passed: boolean;
+  failures: SchematronFailure[];
+}
+
+@Injectable()
+export class UaePintAeSchematronService {
+  private readonly root = process.cwd();
+
+  private readonly saxonJar = resolve(
+    this.root,
+    'tools',
+    'saxon',
+    'saxon-he.jar',
+  );
+
+  private readonly resolverJar = resolve(
+    this.root,
+    'tools',
+    'saxon',
+    'xmlresolver.jar',
+  );
+
+  private readonly sharedXslt = resolve(
+    this.root,
+    'pint-ae',
+    '1.4.4',
+    'trn-invoice',
+    'schematron',
+    'PINT-UBL-validation-preprocessed.xslt',
+  );
+
+  private readonly uaeXslt = resolve(
+    this.root,
+    'pint-ae',
+    '1.4.4',
+    'trn-invoice',
+    'schematron',
+    'PINT-jurisdiction-aligned-rules.xslt',
+  );
+
+  private readonly parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    removeNSPrefix: true,
+    trimValues: true,
+  });
+
+  async validate(
+    xml: string,
+  ): Promise<SchematronValidationResult> {
+    const workDir = await mkdtemp(
+      join(tmpdir(), 'juveria-pint-ae-'),
+    );
+
+    try {
+      const inputPath = join(workDir, 'invoice.xml');
+      const sharedPath = join(workDir, 'shared.svrl');
+      const uaePath = join(workDir, 'uae.svrl');
+
+      await writeFile(inputPath, xml, 'utf8');
+
+      await this.runSaxon(
+        inputPath,
+        this.sharedXslt,
+        sharedPath,
+      );
+
+      await this.runSaxon(
+        inputPath,
+        this.uaeXslt,
+        uaePath,
+      );
+
+      const sharedFailures =
+        await this.readFailures(
+          sharedPath,
+          'SHARED',
+        );
+
+      const uaeFailures =
+        await this.readFailures(
+          uaePath,
+          'UAE',
+        );
+
+      const failures = [
+        ...sharedFailures,
+        ...uaeFailures,
+      ];
+
+      return {
+        shared: {
+          passed: sharedFailures.length === 0,
+          failureCount: sharedFailures.length,
+        },
+        uae: {
+          passed: uaeFailures.length === 0,
+          failureCount: uaeFailures.length,
+        },
+        totalFailures: failures.length,
+        passed: failures.length === 0,
+        failures,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      throw new InternalServerErrorException(
+        `PINT-AE Schematron validation failed: ${message}`,
+      );
+    } finally {
+      await rm(workDir, {
+        recursive: true,
+        force: true,
+      }).catch(() => undefined);
+    }
+  }
+
+  private async runSaxon(
+    inputPath: string,
+    xsltPath: string,
+    outputPath: string,
+  ): Promise<void> {
+    const classPath =
+      `${this.saxonJar};${this.resolverJar}`;
+
+    await execFileAsync(
+      'java',
+      [
+        '-cp',
+        classPath,
+        'net.sf.saxon.Transform',
+        `-s:${inputPath}`,
+        `-xsl:${xsltPath}`,
+        `-o:${outputPath}`,
+      ],
+      {
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+  }
+
+  private async readFailures(
+    path: string,
+    source: 'SHARED' | 'UAE',
+  ): Promise<SchematronFailure[]> {
+    const svrl = await readFile(path, 'utf8');
+    const parsed = this.parser.parse(svrl);
+
+    const root =
+      parsed['schematron-output'] ?? parsed;
+
+    const nodes = this.findFailedAssertions(root);
+
+    return nodes.map((node) => ({
+      source,
+      id: String(node['@_id'] ?? ''),
+      flag: String(node['@_flag'] ?? ''),
+      location:
+        node['@_location'] !== undefined
+          ? String(node['@_location'])
+          : undefined,
+      test:
+        node['@_test'] !== undefined
+          ? String(node['@_test'])
+          : undefined,
+      message: this.extractText(node.text),
+    }));
+  }
+
+  private findFailedAssertions(
+    value: unknown,
+  ): Record<string, any>[] {
+    const results: Record<string, any>[] = [];
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        results.push(
+          ...this.findFailedAssertions(item),
+        );
+      }
+
+      return results;
+    }
+
+    if (
+      value === null ||
+      typeof value !== 'object'
+    ) {
+      return results;
+    }
+
+    const record = value as Record<string, any>;
+
+    for (const [key, child] of Object.entries(record)) {
+      if (key === 'failed-assert') {
+        if (Array.isArray(child)) {
+          results.push(...child);
+        } else if (
+          child &&
+          typeof child === 'object'
+        ) {
+          results.push(child);
+        }
+      }
+
+      results.push(
+        ...this.findFailedAssertions(child),
+      );
+    }
+
+    return results;
+  }
+
+  private extractText(value: unknown): string {
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+
+    if (
+      value &&
+      typeof value === 'object'
+    ) {
+      const record = value as Record<string, unknown>;
+
+      if (typeof record['#text'] === 'string') {
+        return record['#text'].trim();
+      }
+    }
+
+    return '';
+  }
+}

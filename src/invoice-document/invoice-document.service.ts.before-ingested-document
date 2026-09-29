@@ -1,0 +1,68 @@
+import {
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service.js';
+
+@Injectable()
+export class InvoiceDocumentService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async createInvoiceWithDocument(data: {
+    tenantId: string;
+    uploadedById: string;
+    invoiceNumber: string;
+    invoiceDate: string;
+    currency: string;
+    totalAmount: string;
+    originalName: string;
+    storageKey: string;
+    mimeType: string;
+    fileSize: number;
+  }) {
+    return this.prisma.invoice.create({
+      data: {
+        tenantId: data.tenantId,
+        uploadedById: data.uploadedById,
+        invoiceNumber: data.invoiceNumber,
+        invoiceDate: new Date(data.invoiceDate),
+        currency: data.currency,
+        totalAmount: data.totalAmount,
+        status: 'RECEIVED',
+
+        documents: {
+          create: {
+            tenantId: data.tenantId,
+            uploadedById: data.uploadedById,
+            originalName: data.originalName,
+            storageKey: data.storageKey,
+            mimeType: data.mimeType,
+            fileSize: data.fileSize,
+            status: 'UPLOADED',
+          },
+        },
+      },
+      include: {
+        documents: true,
+      },
+    });
+  }
+
+  async findOne(documentId: string, tenantId: string) {
+    const document =
+      await this.prisma.invoiceDocument.findFirst({
+        where: {
+          id: documentId,
+          tenantId,
+        },
+      });
+
+    if (!document) {
+      throw new NotFoundException(
+        'Document not found',
+      );
+    }
+
+    return document;
+  }
+}

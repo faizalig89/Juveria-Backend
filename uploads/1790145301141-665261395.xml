@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice>
+  <InvoiceNumber>XML-001</InvoiceNumber>
+  <Currency>AED</Currency>
+  <TotalAmount>1500.00</TotalAmount>
+</Invoice>

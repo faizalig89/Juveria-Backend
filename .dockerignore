@@ -1,0 +1,42 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies / build output
+node_modules
+dist
+coverage
+
+# Runtime/local data
+uploads
+tmp
+*.log
+
+# Version control / editors
+.git
+.gitignore
+.vscode
+.idea
+
+# Tests and temporary scripts
+*.test.*
+*.spec.*
+stage*.mjs
+
+# Local backups
+*.bak*
+*.backup
+*-backup
+*-backup.*
+*.stage*-backup
+*.stage*-backup.*
+prisma/*.bak*
+prisma/*backup*
+prisma/*before*
+prisma/*pre-stage*
+prisma/*stage*-backup*
+
+# Misc local files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,107 @@
+import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { ComplianceService } from './compliance.service.js';
+import { UaePintAeUblService } from './ubl/uae-pint-ae-ubl.service.js';
+import { UaePintAeSchematronService } from './schematron/uae-pint-ae-schematron.service.js';
+import { UaeEinvoiceReadinessService } from './readiness/uae-einvoice-readiness.service.js';
+
+@Controller('compliance')
+@UseGuards(JwtAuthGuard)
+export class ComplianceController {
+  constructor(
+    private readonly complianceService: ComplianceService,
+    private readonly ublService: UaePintAeUblService,
+    private readonly schematronService: UaePintAeSchematronService,
+    private readonly readinessService: UaeEinvoiceReadinessService,
+  ) {}
+
+  @Post('invoice/:id/readiness')
+  async evaluateReadiness(
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    const { tenantId, userId, sub } = req.user;
+
+    return this.readinessService.evaluate(
+      id,
+      tenantId,
+      userId ?? sub,
+    );
+  }
+  @Get('invoice/:id/ubl')
+  async getUbl(@Param('id') id: string, @Req() req: any) {
+    return {
+      invoiceId: id,
+      format: 'PINT-AE-UBL',
+      xml: await this.ublService.generate(id, req.user.tenantId),
+    };
+  }
+  @Post('invoice/:id/validate')
+  validateInvoice(@Param('id') id: string, @Req() req: any) {
+    const { tenantId, userId, sub } = req.user;
+
+    return this.complianceService.validateInvoice(
+      id,
+      tenantId,
+      userId ?? sub,
+    );
+  }
+
+  @Post('invoice/:id/validate/uae')
+  validateUaeInvoice(@Param('id') id: string, @Req() req: any) {
+    const { tenantId, userId, sub } = req.user;
+
+    return this.complianceService.validateUaeInvoice(
+      id,
+      tenantId,
+      userId ?? sub,
+    );
+  }
+
+  @Get('invoice/:id/results')
+  getResults(@Param('id') id: string, @Req() req: any) {
+    return this.complianceService.getResults(
+      id,
+      req.user.tenantId,
+    );
+  }
+
+  @Get('invoice/:id/results/generic')
+  getGenericResults(@Param('id') id: string, @Req() req: any) {
+    return this.complianceService.getGenericResults(
+      id,
+      req.user.tenantId,
+    );
+  }
+
+  @Get('invoice/:id/results/uae')
+  getUaeResults(@Param('id') id: string, @Req() req: any) {
+    return this.complianceService.getUaeResults(
+      id,
+      req.user.tenantId,
+    );
+  }
+
+
+  @Get('invoice/:id/pint-ae-validation')
+  async validatePintAe(
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    const xml = await this.ublService.generate(
+      id,
+      req.user.tenantId,
+    );
+
+    const validation =
+      await this.schematronService.validate(xml);
+
+    return {
+      invoiceId: id,
+      standard: 'PINT-AE',
+      version: '1.4.4',
+      ublGenerated: true,
+      ...validation,
+    };
+  }
+}

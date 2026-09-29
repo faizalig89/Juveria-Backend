@@ -1,0 +1,33 @@
+import { InvoiceDocumentController } from './invoice-document.controller.js';
+import { Module } from '@nestjs/common';
+
+import { AuthModule } from '../auth/auth.module.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { StorageModule } from '../storage/module.js';
+
+import { InvoiceDocumentService } from './invoice-document.service.js';
+import { InvoiceFileValidatorService } from './invoice-file-validator.service.js';
+
+@Module({
+  imports: [
+    AuthModule,
+    StorageModule,
+  ],
+
+  controllers: [
+    InvoiceDocumentController,
+  ],
+
+  providers: [
+    InvoiceDocumentService,
+    InvoiceFileValidatorService,
+    PrismaService,
+  ],
+
+  exports: [
+    InvoiceDocumentService,
+  ],
+})
+export class InvoiceDocumentModule {}
+
+

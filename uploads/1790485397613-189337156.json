@@ -1,0 +1,15 @@
+﻿{
+  "invoiceNumber": "JUVERIA-UI-TEST-001",
+  "invoiceDate": "2026-09-27",
+  "currency": "AED",
+  "totalAmount": 2200.00,
+  "lines": [
+    {
+      "description": "GRC Consulting Services",
+      "quantity": 1,
+      "unitPrice": 2200.00,
+      "taxAmount": 0,
+      "lineTotal": 2200.00
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+﻿import { Module } from '@nestjs/common';
+import { ComplianceModule } from '../compliance/compliance.module.js';
+import { MockAspAdapter } from './adapters/mock-asp.adapter.js';
+import { ASP_ADAPTER } from './contracts/asp.tokens.js';
+
+@Module({
+  imports: [ComplianceModule],
+  providers: [
+    MockAspAdapter,
+    {
+      provide: ASP_ADAPTER,
+      useExisting: MockAspAdapter,
+    },
+  ],
+  exports: [ASP_ADAPTER],
+})
+export class AspModule {}

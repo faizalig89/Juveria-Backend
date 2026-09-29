@@ -1,0 +1,178 @@
+import { Injectable } from '@nestjs/common';
+import {
+  InvoiceAllowanceChargeRuleContext,
+  InvoiceLineRuleContext,
+  InvoiceRuleContext,
+  InvoiceTaxBreakdownRuleContext,
+  RuleResult,
+} from './rule.types.js';
+
+@Injectable()
+export class UaePintAeTaxBreakdownValidator {
+  private toNumber(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  private equalMoney(left: number, right: number): boolean {
+    return Math.abs(left - right) < 0.005;
+  }
+
+  private sameRate(left: unknown, right: unknown): boolean {
+    const leftRate = this.toNumber(left);
+    const rightRate = this.toNumber(right);
+
+    return (
+      leftRate !== null &&
+      rightRate !== null &&
+      Math.abs(leftRate - rightRate) < 0.000001
+    );
+  }
+
+  evaluate(invoice: InvoiceRuleContext): RuleResult[] {
+    const results: RuleResult[] = [];
+
+    const standardBreakdowns: InvoiceTaxBreakdownRuleContext[] =
+      (invoice.taxBreakdowns ?? []).filter(
+        (breakdown: InvoiceTaxBreakdownRuleContext) =>
+          breakdown.categoryCode === 'S',
+      );
+
+    for (const breakdown of standardBreakdowns) {
+      const rate = this.toNumber(breakdown.taxRate);
+      const taxableAmount = this.toNumber(
+        breakdown.taxableAmount,
+      );
+
+      if (rate === null || taxableAmount === null) {
+        results.push({
+          ruleCode: 'UAE-TAX-S-08',
+          ruleName:
+            'Standard-rated VAT taxable amount reconciliation',
+          status: 'SKIPPED',
+          severity: 'ERROR',
+          message:
+            'Standard-rated VAT reconciliation requires a valid VAT rate and taxable amount',
+          field: 'taxBreakdowns.taxableAmount',
+          actualValue: '',
+        });
+
+        continue;
+      }
+
+      const matchingLines: InvoiceLineRuleContext[] =
+        invoice.lines.filter(
+          (line: InvoiceLineRuleContext) =>
+            line.taxCategoryCode === 'S' &&
+            this.sameRate(line.taxRate, rate),
+        );
+
+      const matchingAllowances: InvoiceAllowanceChargeRuleContext[] =
+        (invoice.allowanceCharges ?? []).filter(
+          (entry: InvoiceAllowanceChargeRuleContext) =>
+            entry.type === 'ALLOWANCE' &&
+            entry.taxCategoryCode === 'S' &&
+            this.sameRate(entry.taxRate, rate),
+        );
+
+      const matchingCharges: InvoiceAllowanceChargeRuleContext[] =
+        (invoice.allowanceCharges ?? []).filter(
+          (entry: InvoiceAllowanceChargeRuleContext) =>
+            entry.type === 'CHARGE' &&
+            entry.taxCategoryCode === 'S' &&
+            this.sameRate(entry.taxRate, rate),
+        );
+
+      const lineAmounts: Array<number | null> =
+        matchingLines.map(
+          (line: InvoiceLineRuleContext) =>
+            this.toNumber(line.lineNetAmount),
+        );
+
+      const allowanceAmounts: Array<number | null> =
+        matchingAllowances.map(
+          (entry: InvoiceAllowanceChargeRuleContext) =>
+            this.toNumber(entry.amount),
+        );
+
+      const chargeAmounts: Array<number | null> =
+        matchingCharges.map(
+          (entry: InvoiceAllowanceChargeRuleContext) =>
+            this.toNumber(entry.amount),
+        );
+
+      const invalidAmount =
+        lineAmounts.some(
+          (value: number | null) => value === null,
+        ) ||
+        allowanceAmounts.some(
+          (value: number | null) => value === null,
+        ) ||
+        chargeAmounts.some(
+          (value: number | null) => value === null,
+        );
+
+      if (invalidAmount) {
+        results.push({
+          ruleCode: 'UAE-TAX-S-08',
+          ruleName:
+            'Standard-rated VAT taxable amount reconciliation',
+          status: 'SKIPPED',
+          severity: 'ERROR',
+          message:
+            'Standard-rated VAT reconciliation contains an invalid line, allowance or charge amount',
+          field: 'taxBreakdowns.taxableAmount',
+          actualValue: '',
+        });
+
+        continue;
+      }
+
+      const lineTotal = lineAmounts.reduce(
+        (sum: number, value: number | null) =>
+          sum + (value ?? 0),
+        0,
+      );
+
+      const allowanceTotal = allowanceAmounts.reduce(
+        (sum: number, value: number | null) =>
+          sum + (value ?? 0),
+        0,
+      );
+
+      const chargeTotal = chargeAmounts.reduce(
+        (sum: number, value: number | null) =>
+          sum + (value ?? 0),
+        0,
+      );
+
+      const calculatedTaxableAmount =
+        lineTotal + chargeTotal - allowanceTotal;
+
+      const valid = this.equalMoney(
+        calculatedTaxableAmount,
+        taxableAmount,
+      );
+
+      results.push({
+        ruleCode: 'UAE-TAX-S-08',
+        ruleName:
+          'Standard-rated VAT taxable amount reconciliation',
+        status: valid ? 'PASS' : 'FAIL',
+        severity: 'ERROR',
+        message: valid
+          ? 'Standard-rated VAT taxable amount reconciles with matching lines, charges and allowances'
+          : 'Standard-rated VAT taxable amount does not reconcile with matching lines, charges and allowances',
+        field: 'taxBreakdowns.taxableAmount',
+        actualValue:
+          `${taxableAmount} | calculated=${calculatedTaxableAmount} | rate=${rate}`,
+      });
+    }
+
+    return results;
+  }
+}

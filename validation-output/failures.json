@@ -1,0 +1,62 @@
+﻿[
+    {
+        "Source":  "SHARED",
+        "Rule":  "ibr-077",
+        "Flag":  "fatal",
+        "Message":  "[ibr-077]-Tax accounting currency code (ibt-006) MUST be different from invoice currency code (ibt-005) when provided."
+    },
+    {
+        "Source":  "SHARED",
+        "Rule":  "ibr-062",
+        "Flag":  "fatal",
+        "Message":  "[ibr-062]-The Seller electronic address (ibt-034) MUST have a Scheme identifier."
+    },
+    {
+        "Source":  "SHARED",
+        "Rule":  "ibr-063",
+        "Flag":  "fatal",
+        "Message":  "[ibr-063]-The Buyer electronic address (ibt-049) MUST have a Scheme identifier.Â  Â"
+    },
+    {
+        "Source":  "SHARED",
+        "Rule":  "ibr-cl-11",
+        "Flag":  "fatal",
+        "Message":  "[ibr-cl-11]-Any registration identifier identification scheme (ibt-030-1), (ibt-047-1), (ibt-061-1) MUST be coded using one of the ISO 6523 ICD list."
+    },
+    {
+        "Source":  "SHARED",
+        "Rule":  "ibr-cl-11",
+        "Flag":  "fatal",
+        "Message":  "[ibr-cl-11]-Any registration identifier identification scheme (ibt-030-1), (ibt-047-1), (ibt-061-1) MUST be coded using one of the ISO 6523 ICD list."
+    },
+    {
+        "Source":  "UAE",
+        "Rule":  "ibr-132-ae",
+        "Flag":  "fatal",
+        "Message":  "[ibr-132-ae]-VAT identifier [IBT-031, IBT-048, IBT-063, BTAE-14] should be TRN [VAT registration number] and must be 15 digits, starting with 1, ending with 03."
+    },
+    {
+        "Source":  "UAE",
+        "Rule":  "ibr-132-ae",
+        "Flag":  "fatal",
+        "Message":  "[ibr-132-ae]-VAT identifier [IBT-031, IBT-048, IBT-063, BTAE-14] should be TRN [VAT registration number] and must be 15 digits, starting with 1, ending with 03."
+    },
+    {
+        "Source":  "UAE",
+        "Rule":  "ibr-192-ae",
+        "Flag":  "fatal",
+        "Message":  "[ibr-192-ae]- when Payment means type code (ibt-081) is \u0027credit transfer\u0027 then Payment account identifier (ibt-084) must be provided."
+    },
+    {
+        "Source":  "UAE",
+        "Rule":  "ibr-125-ae",
+        "Flag":  "fatal",
+        "Message":  "[ibr-125-ae]-In Item Information(IBG-31), Item description (IBT-154) MUST be there."
+    },
+    {
+        "Source":  "UAE",
+        "Rule":  "ibr-126-ae",
+        "Flag":  "fatal",
+        "Message":  "[ibr-126-ae]-In Price Details (IBG-29), Item price base quantity (IBT-149) and Item Gross Price (IBT-148) MUST be there."
+    }
+]

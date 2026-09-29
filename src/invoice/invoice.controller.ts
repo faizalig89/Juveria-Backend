@@ -1,0 +1,92 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { Request } from 'express';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { CreateInvoiceDto } from './dto/create-invoice.dto.js';
+import { UpdateInvoiceRemediationDto } from './dto/update-invoice-remediation.dto.js';
+import { InvoiceService } from './invoice.service.js';
+
+interface AuthenticatedRequest extends Request {
+  user: {
+    userId: string;
+    tenantId: string;
+    email: string;
+    role: string;
+  };
+}
+
+@UseGuards(JwtAuthGuard)
+@Controller('invoice')
+export class InvoiceController {
+  constructor(private readonly invoiceService: InvoiceService) {}
+
+  @Post()
+  async create(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: CreateInvoiceDto,
+  ) {
+    return this.invoiceService.create(
+      body,
+      req.user.tenantId,
+      req.user.userId,
+    );
+  }
+
+  @Get('tenant/:tenantId')
+  async findAllByTenant(
+    @Req() req: AuthenticatedRequest,
+    @Param('tenantId') tenantId: string,
+  ) {
+    if (tenantId !== req.user.tenantId) {
+      return [];
+    }
+
+    return this.invoiceService.findAllByTenant(
+      req.user.tenantId,
+    );
+  }
+
+  @Get(':id/audit')
+  async getAuditHistory(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.invoiceService.getAuditHistory(
+      id,
+      req.user.tenantId,
+    );
+  }
+
+  @Patch(':id/remediation')
+  async updateRemediation(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Body() body: UpdateInvoiceRemediationDto,
+  ) {
+    return this.invoiceService.updateRemediation(
+      id,
+      req.user.tenantId,
+      req.user.userId,
+      body,
+    );
+  }
+
+  @Get(':id')
+  async findOne(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.invoiceService.findOne(
+      id,
+      req.user.tenantId,
+    );
+  }
+}
